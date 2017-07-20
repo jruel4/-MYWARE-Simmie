@@ -19,7 +19,9 @@ from pylsl import StreamInfo, StreamOutlet, StreamInlet, resolve_stream
 
 class EEGStateAdapter:
     
-    def __init__(self):
+    def __init__(self, eeg_feed_rate=250, epoch_duration=2, num_features=30):
+        self.num_features = num_features
+        self.cache_interval = int(eeg_feed_rate*epoch_duration)
         self.eeg_thread_event = Event()
         self.eeg_data_cache = list()
         
@@ -36,12 +38,12 @@ class EEGStateAdapter:
             snum = input("Select EEGStateAdapter stream: ")
         self.inlet = StreamInlet(streams[snum])
         # launch thread
-        self.command_thread_event.set()
+        self.eeg_thread_event.set()
         thread = Thread(target=self.command_rx_thread)
         thread.start()
         
     def stop_eeg_thread(self):
-        self.command_thread_event.clear()
+        self.eeg_thread_event.clear()
 
     def eeg_rx_thread(self):
         '''
@@ -49,18 +51,22 @@ class EEGStateAdapter:
         process commands as they arrive.
         '''
         
-        while self.command_thread_event.isSet():
+        rx_counter = 0
+        while self.eeg_thread_event.isSet():
     
             # get command
-            command_set, timestamps = self.inlet.pull_sample()
+            eeg_power, timestamps = self.inlet.pull_sample()
             
-            # cache
-            self.imprint_data_cache += [(command_set, timestamps)]
+            assert len(eeg_power) == self.num_features
             
-        print("Exiting imprint adapter rx thread")
-        
-    
-    
+            # inc rx count
+            rx_counter += 1
+            
+            # cache if apt.
+            if rx_counter % self.cache_interval == 0:
+                self.eeg_data_cache += [(eeg_power, timestamps)]
+                
+            
     
     
     
