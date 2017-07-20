@@ -7,7 +7,6 @@ Forward Propogation of policy network. Synchronized to real-time user experience
 # Imports 
 import multiprocessing
 
-
 class ActionProcess(multiprocessing.Process):
     
     def __init__(self, _args):

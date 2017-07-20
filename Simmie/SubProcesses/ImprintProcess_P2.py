@@ -13,7 +13,14 @@ import multiprocessing
 
 class ImprintProcess(multiprocessing.Process):
 
-    def run(self):
+    def __init__(self, _args):
+        
+        # init name
+        self.process_name = "Imprint Process"
+        
+        # call super init
+        super(ImprintProcess, self).__init__(name=self.process_name, args=_args)
+
+    def run(self, *args):
         print 'In %s' % self.name
         return
-
