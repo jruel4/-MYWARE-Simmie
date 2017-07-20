@@ -33,9 +33,10 @@ class ImprintAdapter:
         self.command_thread_event = Event()
         self.imprint_data_cache = list()
         
-    def retrieve_training_batch(self):
-        #TODO what numpy format is good?
-        pass
+    def get_data(self):
+        data = self.imprint_data_cache
+        self.imprint_data_cache = list()
+        return data
     
     def launch_command_adapter(self, manual_stream_select=True): 
         streams = resolve_stream('type', 'AudioCommands')
