@@ -5,50 +5,106 @@ Description: Audio commands for entrainment oscillators from PI network.
 
 Consumers: AudioSlave
 '''
-
 '''
-AudioSlave CommandAdapter rx spec:
+Input: 
     
-    osc_id = self.OscVals[command_set[self.OscIdx] - self.OscOffset]
-    vol = self.DynamicsVals[command_set[self.DynamicsIdx] - self.DynamicsOffset]
-    base = self.FMVals[command_set[self.FMIdx] - self.FMOffset]
-    bleat = self.AMVals[command_set[self.AMIdx] - self.AMOffset]
+    - One-hot index from policy network
     
-    Initial command logic will suppose no coupled oscillators and 4 uncoupled.
-    We need to map each command to AudioSlave command, which simply means 
-    that we need an interface method to feed the command set into.
+Output: 
     
-    - Dynamics:
-        - 0 = 0.5
-        - 1 = 0.3
-        - 2 = 0.1
+    - audio command set over lsl as list = [dynamics, fm, am, osc]
+    
+Processing:
+    
+    - The output from the one hot vector will already be "encoded" so we can just
+      send it over LSL. But we do need to check to make sure that correct order
+      of commands we enforced.
+          
+'''
+
+# Imports
+from pylsl import StreamInfo, StreamOutlet, StreamInlet, resolve_stream
+
+class AudioCommandAdapter:
+    
+    # Static vars - these should actually be shard with AudioSlave Adapter
+    DynamicsCommands = list(range(0,3))
+    FMCommands = list(range(3,33))
+    AMCommands = list(range(33,63))
+    OscillatorUncoupledCommands = list(range(63,67))
+    
+    def __init__(self):        
+        self.command_set = list()
+        self.info = StreamInfo('MartianWearables', 'AudioCommands', 4, 4, 'int32', 'AudioCommandUID002')
+        self.outlet = StreamOutlet(self.info)
+
+    def submit_command(self, command_idx):
+        '''
+        To be called by policy client after outputing a command each time.
+        '''
         
-    - FM:
-        - 3 = get_n_key_freq(35)
-        - 4 = get_n_key_freq(36)
-        .
-        .
-        .
-        - 32 = get_n_key_freq(64)
+        #TODO collect commands into local buf, every 4, check them and send.
+        self.command_set += [command_idx]
+        if len(self.command_set) == 4:
+            if not self.check_valid_set():
+                print("ERROR: Command adapter received invalid set")
+                self.command_set = list()
+                return False
+            
+            # send over network
+            self.outlet.push_sample(self.command_set)
+            
+            # Clear
+            self.command_set = list()
+            
+        return True
+            
+    def check_valid_set(self):
+        dynamic_first = self.command_set[0] in AudioCommandAdapter.DynamicsCommands
+        fm_second = self.command_set[1] in AudioCommandAdapter.FMCommands
+        am_third = self.command_set[2] in AudioCommandAdapter.AMCommands
+        osc_fourth = self.command_set[3] in AudioCommandAdapter.OscillatorUncoupledCommands
         
-    - AM:
-        - 33 = 0 Hz
-        - 34 = 1 Hz
-        .
-        .
-        .
-        - 62 = 29 Hz
+        return dynamic_first and fm_second and am_third and osc_fourth
+    
+if __name__ == "__main__":
+    
+    adapter = AudioCommandAdapter()
+    
+    # test good data
+    good = [1,30,34,65]
+    for v in good:
+        print adapter.submit_command(v)
+    
+    bad = [17,30,2,65]
+    for v in bad:
+        print adapter.submit_command(v)
+    
         
-    - Oscillator (Uncoupled):
-        - 63 = Oscillator_1
-        - 64 = Oscillator_2
-        - 65 = Oscillator_3
-        - 66 = Oscillator_4
+
+
         
-    # TODO
-    - Oscillator (Coupled):
-        - 67 = IAF (AM locked to IAF)
-        - 68 = BBF (Dynamics locked to Beta)
-        - 69 = ABF (Dynamics locked to IAF)
-        - 70 = TBF (Dynamics locked to Theta)
-    '''
+        
+        
+        
+        
+        
+        
+        
+        
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
