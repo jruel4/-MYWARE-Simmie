@@ -43,13 +43,11 @@ def create_graph(device1, device2):
   params_size = 250*1000*FLAGS.data_mb # 1MB is 250k integers
 
   with tf.device(device1):
-    params = tf.get_variable("params", [params_size], dtype,
-                             initializer=tf.zeros_initializer)
+    params = tf.get_variable("params", [params_size], dtype)
   with tf.device(device2):
     # constant node gets placed on device1 because of simple_placer
     #    update = tf.constant(1, shape=[params_size], dtype=dtype)
-    update = tf.get_variable("update", [params_size], dtype,
-                             initializer=tf.ones_initializer)
+    update = tf.get_variable("update", [params_size], dtype)
     add_op = params.assign_add(update)
     
   init_op = tf.initialize_all_variables()
@@ -78,7 +76,7 @@ def run_benchmark_distributed():
   ops = create_graph("/job:worker/task:0", "/job:worker/task:1")
 
   # launch distributed service
-  def runcmd(cmd): subprocess.Popen(cmd, shell=True, stderr=subprocess.STDOUT)
+  def runcmd(cmd): subprocess.Popen(cmd, shell=True)
   runcmd("python %s --task=0"%(sys.argv[0]))
   runcmd("python %s --task=1"%(sys.argv[0]))
   time.sleep(1)
