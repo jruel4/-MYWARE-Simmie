@@ -6,18 +6,22 @@ Forward Propogation of policy network. Synchronized to real-time user experience
 
 # Imports 
 import multiprocessing
+import sys
+from IPython.utils import io
 
 class ActionProcess(multiprocessing.Process):
     
     def __init__(self, _args):
         
+        self.logqueue = _args[2]
+
         # init name
         self.process_name = "Action Process"
         
         # call super init
-        super(ActionProcess, self).__init__(name=self.process_name, args=_args)
+        super(ActionProcess, self).__init__(name=self.process_name)
 
     def run(self, *args):
-        print 'In %s' % self.name
+        self.logqueue.put('In %s' % self.name)
         return
 

@@ -10,7 +10,7 @@ Asynchronous BV thread should run:
 
 # Imports 
 import multiprocessing
-
+import sys, os
 
 class BiometricValueProcess(multiprocessing.Process):
     
@@ -23,5 +23,6 @@ class BiometricValueProcess(multiprocessing.Process):
         super(BiometricValueProcess, self).__init__(name=self.process_name, args=_args)
 
     def run(self, *args):
-        print 'In %s' % self.name
+#        sys.stdout = open(str(os.getpid()) + ".out", 'w')
+#        sys.stdout.write("TMP")
         return

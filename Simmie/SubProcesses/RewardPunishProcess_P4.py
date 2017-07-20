@@ -20,5 +20,4 @@ class RewardPunishProcess(multiprocessing.Process):
         super(RewardPunishProcess, self).__init__(name=self.process_name, args=_args)
 
     def run(self, *args):
-        print 'In %s' % self.name
         return
