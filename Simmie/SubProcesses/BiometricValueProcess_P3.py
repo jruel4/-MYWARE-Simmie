@@ -7,3 +7,14 @@ Asynchronous BV thread should run:
     
     - V* back prop (learn from TD error)
 '''
+
+# Imports 
+import multiprocessing
+
+
+class BiometricValueProcess(multiprocessing.Process):
+
+    def run(self):
+        print 'In %s' % self.name
+        return
+

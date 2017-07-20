@@ -18,7 +18,7 @@ def worker(num):
     return
 
 if __name__ == '__main__':
-    multiprocessing.log_to_stderr(logging.DEBUG) # debugginh
+    multiprocessing.log_to_stderr(logging.DEBUG) # debugging
     jobs = []
     # TODO pass Event as argument!
     for i in range(5):
