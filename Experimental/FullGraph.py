@@ -5,11 +5,12 @@ Created on Thu Jul 20 06:02:07 2017
 @author: marzipan
 """
 
+import time
 import tensorflow as tf
 import numpy as np
 
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\Experimental\Logs\\'
-G_logdir = G_logs + 'A16\\'
+G_logdir = G_logs + 'A31\\'
 
 
 
@@ -50,7 +51,7 @@ with tf.name_scope("tgt") as tgt_scope:
     
     with tf.name_scope('summaries'):
         tf.summary.scalar("tgt_step", tgt_step)
-        tf.summary.scalar("tgt_predict", tgt_out_predict)
+#        tf.summary.scalar("tgt_predict", tgt_out_predict)
         tf.summary.scalar("tgt_loss", tgt_loss)
 
 
@@ -94,11 +95,11 @@ with tf.name_scope("val"):
 
     with tf.name_scope('summaries'):
         tf.summary.scalar("val_step", val_step)
-        tf.summary.scalar("val_loss", val_loss)
+        tf.summary.scalar("val_loss", val_loss[0,0])
         tf.summary.scalar("val_prediction_error", val_prediction_error)
         tf.summary.scalar("val_previous_predicted", val_previous_predicted)
         tf.summary.scalar("val_current_reward", val_actual_reward)
-        tf.summary.scalar("val_next_predicted", val_next_predicted)
+        tf.summary.scalar("val_next_predicted", val_next_predicted[0,0])
 
     
     with tf.control_dependencies([val_loss]):
@@ -120,7 +121,7 @@ with tf.name_scope("pol"):
         pol_out_predict = tf.arg_max(pol_out_softmax, 1, "POL_Prediction")
 
     with tf.name_scope("summaries"):
-        tf.summary.scalar("pol_prediction", pol_out_predict)
+        tf.summary.scalar("pol_prediction", pol_out_predict[0])
     
     with tf.name_scope("pol_imp"):
         # imprinting
@@ -144,7 +145,7 @@ with tf.name_scope("pol"):
     
         with tf.name_scope('summaries'):
             tf.summary.scalar("pol_unsup_step", pol_unsup_step)
-            tf.summary.scalar("pol_unsup_loss", pol_unsup_loss)
+            tf.summary.scalar("pol_unsup_loss", pol_unsup_loss[0,0])
 
 
 ###
@@ -198,8 +199,6 @@ def tgt_predict(sess, writer, eeg_data, sessrun_name=''):
 
 
 def tgt_train(sess, writer, eeg_data, rpv, sessrun_name=''):
-    print(rpv)
-    print(in_rpv)
     feed = {
             in_eeg_features    : eeg_data,
             in_rpv             : rpv       }
@@ -255,21 +254,38 @@ def pol_unsup_train(sess, writer, eeg_data, sessrun_name=''):
     return train(sess,writer,feed,fetch,sessrun_name)
 
 
+saver = tf.train.Saver()
 sess = tf.Session()
 summary_writer = tf.summary.FileWriter(G_logdir, sess.graph)
 sess.run(tf.global_variables_initializer())
 
-tgt_predict(sess,summary_writer,spoof_data(),'TGT_PRED_1TST')
-pol_predict(sess,summary_writer,spoof_data(),'POL_PRED_1TST')
-tgt_train(sess,summary_writer,spoof_data(),spoof_rpv(),'TGT_TRN_1TST')
-val_train(sess,summary_writer,spoof_data(),'VAL_TRN_TST')
-pol_imp_train(sess,summary_writer,spoof_data(),spoof_act(),'POL_IMP_TRN_TST')
-pol_unsup_train(sess,summary_writer,spoof_data(),'POL_UNSUP_TRN_TST')
+tgt_predict(sess,summary_writer,spoof_data(1000),'TGT_PRED_TST')
+pol_predict(sess,summary_writer,spoof_data(1000),'POL_PRED_TST')
+tgt_train(sess,summary_writer,spoof_data(1000),spoof_rpv(1000),'TGT_TRN_TST')
+val_train(sess,summary_writer,spoof_data(1000),'VAL_TRN_TST')
+pol_imp_train(sess,summary_writer,spoof_data(1000),spoof_act(1000),'POL_IMP_TRN_TST')
+pol_unsup_train(sess,summary_writer,spoof_data(1000),'POL_UNSUP_TRN_TST')
 
 
-feed = {
-            in_eeg_features    : spoof_data(),
-            in_rpv             : spoof_rpv(),       
-            in_action          : spoof_act()}
-s = sess.run(summary_op, feed)
-summary_writer.add_summary(s, global_step=0)
+beg = time.time()
+for i in range(10):
+    
+    tgt_predict(sess,summary_writer,spoof_data(2500))
+    pol_predict(sess,summary_writer,spoof_data(2500))
+    tgt_train(sess,summary_writer,spoof_data(2500),spoof_rpv(2500))
+    val_train(sess,summary_writer,spoof_data(2500))
+    pol_imp_train(sess,summary_writer,spoof_data(2500),spoof_act(2500))
+    pol_unsup_train(sess,summary_writer,spoof_data(2500))
+    
+    for j in range(1):
+        feed = {
+                    in_eeg_features    : spoof_data(),
+                    in_rpv             : spoof_rpv(),       
+                    in_action          : spoof_act()}
+        s = sess.run(summary_op, feed)
+        summary_writer.add_summary(s, global_step=i*2 + j)
+    print(i, time.time() - beg)
+
+print("Saving checkpoint")
+checkpoint_file = G_logdir + 'model.ckpt'
+saver.save(sess, checkpoint_file, global_step=50)
