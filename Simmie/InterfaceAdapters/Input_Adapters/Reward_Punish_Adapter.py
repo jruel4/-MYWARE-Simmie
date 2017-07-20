@@ -1,8 +1,7 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jul 19 23:55:45 2017
+'''
+Source: User via StreamManager
 
-@author: marzipan
-"""
+Description: Positive, negative and neutral feedback from user for training Target network.
 
+subprocesses: P4 input
+'''

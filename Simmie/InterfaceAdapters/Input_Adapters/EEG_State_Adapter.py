@@ -1,8 +1,7 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jul 19 23:54:06 2017
+'''
+Source: MartianBCI Pipeline
 
-@author: marzipan
-"""
+Description: Formatted EEG data of basic and expert features.
 
+subprocesses: P1 input and P2 input
+'''
