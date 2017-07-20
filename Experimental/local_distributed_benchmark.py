@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jul 20 04:10:21 2017
+
+@author: marzipan
+"""
+
+import tensorflow as tf
+
 """Benchmark tensorflow distributed by adding vector of ones on worker2
 to variable on worker1 as fast as possible.
 
@@ -14,7 +23,7 @@ import time
 import sys
 
 flags = tf.flags
-flags.DEFINE_integer("iters", 10, "Maximum number of additions")
+flags.DEFINE_integer("iters", 1, "Maximum number of additions")
 flags.DEFINE_integer("data_mb", 100, "size of vector in MBs")
 flags.DEFINE_string("port1", "12222", "port of worker1")
 flags.DEFINE_string("port2", "12223", "port of worker2")
