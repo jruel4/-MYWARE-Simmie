@@ -11,30 +11,30 @@ import numpy as np
 
 from Simmie.Simmie.InterfaceAdapters.Output_Adapters.Audio_Command_Adapter import AudioCommandAdapter
 from Simmie.Simmie.InterfaceAdapters.Input_Adapters.EEG_State_Adapter import EEGStateAdapter
-OUTPUT = AudioCommandAdapter()
+OUTPUT = AudioCommandAdapter(name="Simmie", uid=np.random.randint(0,1e4))
 INPUT = EEGStateAdapter(n_freq=30, #should match with pipeline
                         n_chan=8, #should match with pipeline
-                        eeg_feed_rate=250, #sps
+                        eeg_feed_rate=10, #sps
                         samples_per_output=1, # 
                         spectrogram_timespan=10, #assumed to be in seconds
                         n_spectrogram_timepoints=10)
 
-naudio_commands = len(OUTPUT.get_valid_audio_commands())
+
 
 
 
 
 
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\Experimental\Logs\\'
-G_logdir = G_logs + 'A39\\'
+G_logdir = G_logs + 'A40\\'
 
 '''
 
 All input parameters the next receives
 
 '''
-
-shape_eeg_feat = [None,1,30 * 30 * 16]
+naudio_commands = len(OUTPUT.get_valid_audio_commands())
+shape_eeg_feat = [None,1,30 * 10 * 8]
 shape_rpv = [None,2]
 shape_act = [None,naudio_commands]
 
@@ -143,7 +143,6 @@ with tf.name_scope("val"):
 #     summary_writer.add_summary(q,global_step = 1000)
 #     print(tgt_dense0)
 #==============================================================================
-    
 
 ##
 # Policy parameters
@@ -293,7 +292,7 @@ def pol_rl_train(sess, writer, eeg_data, sessrun_name=''):
             }
     return train(sess,writer,feed,fetch,sessrun_name)
 
-
+# Tensorflow Init
 saver = tf.train.Saver()
 sess = tf.Session()
 summary_writer = tf.summary.FileWriter(G_logdir, sess.graph)
@@ -306,71 +305,120 @@ val_train(sess,summary_writer,spoof_data(1000),'VAL_TRN_TST')
 pol_imp_train(sess,summary_writer,spoof_data(1000),spoof_act(1000),'POL_IMP_TRN_TST')
 pol_rl_train(sess,summary_writer,spoof_data(1000),'POL_RL_TRN_TST')
 
-beg = time.time()
 
-b_size = 250
-t_steps = 1
-fd0 = spoof_data(1)
-fd = spoof_data(b_size)
-fa = spoof_act(b_size)
-fr = spoof_rpv(b_size)
+# Batching
+imp_training_data = list()
+tgt_training_data = list()
+rl_training_data = list()
+tgt_minimum_batch_size = 10
+imp_minimum_batch_size = 25
+rl_minimum_batch_size = 25
+
+# Intervals - all in seconds!
+interval_send_command = 1.0 # time to send all commands
+interval_console_output = 2.5
+interval_summary_writer = 2.5
+interval_graph_saver = 60
+
+# Timerkeepers / timers
+timekeep_send_command = time.time()
+timekeep_console_output = time.time()
+timekeep_summary_writer = time.time()
+timekeep_graph_saver = time.time()
+
+timekeep_beginning = time.time()
+
+# Logging
+cmds_sent = 0
+loop_idx = 0
+
+policy_rl_train_info = None
+policy_imp_train_info = None
+value_train_info = None
+tgt_train_info = None
 
 
+# Start the input threads
+INPUT.launch_eeg_adapter()
 
-for i in range(t_steps):
-    
-    
-    # state: nchan x nsamples x nfreq
-    #   (chan, sample, None) if no data or bad data
-    # act_labels: nchan x nsamples x nfreqs nsamples
-    # rpv_labesl: nsamples x 2
-    #   data format is one-hot (Bad, Good)
-    #   (None,None) if no action
-    
-    states, act_data, rpv_data = INPUT.retrieve_latest_data()
+# input timekeep and interval, return (is_beeping, new_timekeep)
+def check_timekeep(timekeep, interval):
+    is_beeping = ((time.time() - timekeep) > interval)
+    return (is_beeping, time.time() if is_beeping else timekeep)
 
-    # We got nothin'
-    if states == None:
-        continue
+
+#==============================================================================
+# !!!!!!!!!
+# HUGE TODO
+# Freeze LSTM state, restore at the end!
+# Could also just freeze during predictions and do one training per 
+# !!!!!!!!!
+#==============================================================================
+
+while(True):
+    loop_idx += 1
     
-    act_out = pol_predict(sess, summary_writer, fd0)['prediction']
+    timekeep_send_command   ,   do_sendcommand   = check_timekeep(timekeep_send_command,    interval_send_command)
+    timekeep_console_output ,   do_console       = check_timekeep(timekeep_console_output,  interval_console_output)
+    timekeep_summary_writer ,   do_summaries     = check_timekeep(timekeep_summary_writer,  interval_summary_writer)
+    timekeep_graph_saver    ,   do_save          = check_timekeep(timekeep_graph_saver,     interval_graph_saver)
     
-    AudioCommandAdapter(pred)
+    # Get new data from adapters
+    raw_data, imp_data, tgt_data = INPUT.retrieve_latest_data()
+
+    # Check if actually got any data
+    if raw_data != None:
+        rl_training_data.append(raw_data)
+    else:
+        # imp_data / rpv_data should NEVER contain any data if raw_data is empty
+        # should be safe to skip
+        continue 
+
+    # Send output commands if they have not been sent in this interval
+    if do_sendcommand:
+        for i in range(4):
+            act_out = pol_predict(sess, summary_writer, raw_data[None,0,None,:])['prediction'] # TODO, Ok to send states like this?
+            OUTPUT.submit_command(act_out)
+        cmds_sent += 1
+        do_sendcommand = False
+
+    # Load training data if any is present
+    if imp_data != None: imp_training_data.append(imp_data)
+    if tgt_data != None: tgt_training_data.append(tgt_data)
+
     
-    state_buf.append(state)
-        ...
-    
-    # batch size
-    if i % 250 == 0:
-    if len(rpv_train_set)
-        tgt_train(state_buf, act_labels)
-            ...
-        # reset buffers
-        state_buf = list()
-            ...
-    
-    if DO_IMPRINT:
+    # Check to see if we have enough data to train
+    if len(rl_training_data) >= rl_minimum_batch_size:
+        policy_rl_train_info = pol_rl_train(sess, summary_writer, rl_training_data)
+        value_train_info = val_train(sess, summary_writer, rl_training_data)
+        raw_data = list() 
         
-        s_pi = pol_imp_train(sess,summary_writer,fd,fa)
-    
-    
-#    tgt_predict(sess,summary_writer,spoof_data(1))
-    pol_predict(sess,summary_writer,fd0)
-    
-    if i % 250 == 0:
-        beg = time.time()
-        s_pr = pol_rl_train(sess,summary_writer,fd)
-        s_v = val_train(sess,summary_writer,fd)
+        # Write training summaries
+        if do_summaries:
+            summary_writer.add_summary(policy_rl_train_info['summaries'], global_step=policy_rl_train_info['step'])
+            summary_writer.add_summary(value_train_info['summaries'], global_step=value_train_info['step'])
 
-        s_t = tgt_train(sess,summary_writer,fd,fr)
-        
-        beg1=  time.time()
-        summary_writer.add_summary(s_t['summaries'], global_step=s_t['step'])
-        summary_writer.add_summary(s_v['summaries'], global_step=s_v['step'])
-        summary_writer.add_summary(s_pi['summaries'], global_step=s_pi['step'])
-        summary_writer.add_summary(s_pr['summaries'], global_step=s_pr['step'])
-        print(i, " train: ", beg1 - beg, "\tsummaries: ", time.time() - beg1)
 
-print("Saving checkpoint")
-checkpoint_file = G_logdir + 'model.ckpt'
-saver.save(sess, checkpoint_file, global_step=t_steps)
+    if len(imp_training_data) >= imp_minimum_batch_size:
+        policy_imp_train_info = pol_imp_train(sess, summary_writer, imp_training_data)
+        imp_training_data = list()
+        if do_summaries:
+            summary_writer.add_summary(policy_imp_train_info['summaries'], global_step=policy_imp_train_info['step'])
+
+    if len(tgt_training_data) >= tgt_minimum_batch_size:
+        tgt_train_info = tgt_train(sess, summary_writer, tgt_training_data)
+        tgt_training_data = list()
+        if do_summaries:
+            summary_writer.add_summary(tgt_train_info['summaries'], global_step=tgt_train_info['step'])
+
+    if do_console:
+        print("Single loop took: ", time.time() - timekeep_console_output,
+              ", loop number: ", loop_idx,
+              ", cmds sent: ", cmds_sent)
+        do_console = False
+
+    if do_save:
+        print("Saving checkpoint")
+        checkpoint_file = G_logdir + 'model.ckpt'
+        saver.save(sess, checkpoint_file, global_step=loop_idx)
+    

@@ -17,7 +17,7 @@ from pylsl import StreamInfo, StreamOutlet, StreamInlet, resolve_stream
 
 class RewardPunishAdapter:
     
-    def __init__(self, p_keys=None, r_keys=None, dbg=True):
+    def __init__(self, p_keys=None, r_keys=None, dbg=False):
         self.thread_event = Event()
         self.rpv_data_cache = list()
 
@@ -48,13 +48,13 @@ class RewardPunishAdapter:
         self.inlet = StreamInlet(streams[int(snum)])
         # launch thread
         self.thread_event.set()
-        thread = Thread(target=self.command_rx_thread)
+        thread = Thread(target=self.rpv_rx_thread)
         thread.start()
         
-    def stop_imprint_thread(self):
+    def stop_rpv_thread(self):
         self.thread_event.clear()
 
-    def command_rx_thread(self):
+    def rpv_rx_thread(self):
         '''
         Receiver will need to select correct stream, then continuously accept and 
         process commands as they arrive.
@@ -64,7 +64,8 @@ class RewardPunishAdapter:
         while self.thread_event.isSet():
     
             # get command
-            command_set, timestamps = self.inlet.pull_sample()
+            command_set, timestamps = self.inlet.pull_sample(timeout=1)
+            if command_set == None: continue #if timed out, check if thread is sitll alive
             
             
             if command_set[0] in self.r_keys:
@@ -78,7 +79,7 @@ class RewardPunishAdapter:
             # cache
             self.rpv_data_cache += [(output, timestamps)]
             
-        print("Exiting imprint adapter rx thread")
+        print("Exiting rpv adapter rx thread")
         
         
         

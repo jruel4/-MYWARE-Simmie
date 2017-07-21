@@ -35,11 +35,11 @@ class EEGStateAdapter:
         self.cache_interval = int(samples_per_output)
         self.eeg_thread_event = Event()
         self.eeg_data_cache = list()
-        self.eeg_fifo = deque([[[0]*n_freq]*n_chan]*(eeg_feed_rate*n_spectrogram_timepoints), maxlen=self.eeg_fifo_len)
+        self.eeg_fifo = deque(np.zeros([(eeg_feed_rate*spectrogram_timespan), n_chan * n_freq]), maxlen=self.eeg_fifo_len)
         
         # Init other adapters
-        self.imprintAdapter = ImprintAdapter()
-        self.rpvAdapter = RewardPunishAdapter()
+        self.imprintAdapter = ImprintAdapter(dbg=True)
+        self.rpvAdapter = RewardPunishAdapter(dbg=True)
         
         self.rpvDataSynced = list()
         self.imprintDataSynced = list()
@@ -81,29 +81,42 @@ class EEGStateAdapter:
             data = eeg_data, np.asarray(self.rpv_data), np.asarray(self.imprint_data)
             
             # clear caches
-            self.rpv_data = list()
-            self.imprint_data = list()
-            self.eeg_data_cache = list()
+            self.clear_caches()
             
             return data
         else:
             return (None, None, None) 
     
-    def launch_eeg_adapter(self, manual_stream_select=True): 
-        streams = resolve_stream('type', 'AudioCommands')
+    def launch_eeg_adapter(self, manual_stream_select=True):
+        
+        self.imprintAdapter.launch_imprint_adapter()
+        self.rpvAdapter.launch_rpv_adapter()
+
+        print("Resolving EEG marker stream...")
+        streams = resolve_stream('type', 'SPECT')
         snum = 0
         if manual_stream_select:
             for i,s in enumerate(streams):
                 print(i,s.name())
             snum = input("Select EEGStateAdapter stream: ")
-        self.inlet = StreamInlet(streams[snum])
+        self.inlet = StreamInlet(streams[int(snum)])
         # launch thread
         self.eeg_thread_event.set()
-        thread = Thread(target=self.command_rx_thread)
+        thread = Thread(target=self.eeg_rx_thread)
         thread.start()
         
     def stop_eeg_thread(self):
+        self.imprintAdapter.stop_imprint_thread()
+        self.rpvAdapter.stop_rpv_thread()
         self.eeg_thread_event.clear()
+        
+    def clear_caches(self, clear_subadapters=False):
+        self.rpv_data = list()
+        self.imprint_data = list()
+        self.eeg_data_cache = list()
+        if clear_subadapters:
+            self.rpvAdapter.get_data()
+            self.imprintAdapter.get_data()
 
     def eeg_rx_thread(self):
         '''
@@ -112,11 +125,12 @@ class EEGStateAdapter:
         '''
         
         rx_counter = 0
-        fifo_idx = np.linspace(0,self.eeg_fifo_len-1,self.num_spectrogram_timepoints).astype(int)
+        fifo_idx = np.linspace(0,self.eeg_fifo_len-1,self.n_spectrogram_timepoints).astype(int)
         while self.eeg_thread_event.isSet():
     
             # get command
-            eeg_periodo, timestamp = self.inlet.pull_sample()
+            eeg_periodo, timestamp = self.inlet.pull_sample(timeout=1)
+            if eeg_periodo == None: continue #if timed out, check if thread is sitll alive
             
             assert len(eeg_periodo) == self.num_channels * self.num_freqs #lsl output is flattened periodo
             
@@ -128,7 +142,7 @@ class EEGStateAdapter:
             
             # cache if apt.
             if rx_counter % self.cache_interval == 0:
-                self.eeg_data_cache += [(np.asarray(self.eeg_fifo)[fifo_idx,:,:], timestamp)]
+                self.eeg_data_cache += [(np.asarray(self.eeg_fifo)[fifo_idx,:], timestamp)]
             
             
     def sync_data(self, _inputs, labels):
@@ -174,17 +188,11 @@ class EEGStateAdapter:
             
         return synced_pairs, ts_diffs
         
-#==============================================================================
-# if __name__ == '__main__':
-#     
-#     # create fake input and lable data
-#     fake_input = [(i+.01,i+.02) for i in range(10)] + [(666,0),(666,4.0)]      
-#     fake_label = [(i,i) for i in range(10)]
-#     
-#     print(sync_data(fake_input, fake_label))
-#         
-#     
-#==============================================================================
+if __name__ == '__main__':
+    
+    eeg = EEGStateAdapter()
+    eeg.launch_eeg_adapter()
+    
     
     
     

@@ -29,24 +29,27 @@ from pylsl import StreamInfo, StreamOutlet, StreamInlet, resolve_stream
 
 class ImprintAdapter:
     
-    def __init__(self):
+    def __init__(self, dbg=False):
         self.command_thread_event = Event()
         self.imprint_data_cache = list()
         self.COMMAND_SPACING = 0.004 # seconds
+        
+        self.dbg = dbg
         
     def get_data(self):
         data = self.imprint_data_cache
         self.imprint_data_cache = list()
         return data
     
-    def launch_command_adapter(self, manual_stream_select=True): 
+    def launch_imprint_adapter(self, manual_stream_select=True): 
+        print("Resolving AudioCommands marker stream...")
         streams = resolve_stream('type', 'AudioCommands')
         snum = 0
         if manual_stream_select:
             for i,s in enumerate(streams):
                 print(i,s.name())
             snum = input("Select desired stream: ")
-        self.inlet = StreamInlet(streams[snum])
+        self.inlet = StreamInlet(streams[int(snum)])
         # launch thread
         self.command_thread_event.set()
         thread = Thread(target=self.command_rx_thread)
@@ -64,23 +67,21 @@ class ImprintAdapter:
         while self.command_thread_event.isSet():
     
             # get command
-            command_set, timestamp = self.inlet.pull_sample()
+            command_set, timestamp = self.inlet.pull_sample(timeout=1)
+            if command_set == None: continue #if timed out, check if thread is sitll alive
             
             # Parse command set into 4 distincy command
             for i,command in enumerate(command_set):
                 # cache
                 self.imprint_data_cache += [(command, timestamp + (i*self.COMMAND_SPACING))]
-            
+            if self.dbg: print(command_set)
+
         print("Exiting imprint adapter rx thread")
         
         
-        
-        
-        
-        
-        
-        
-        
+if __name__ == "__main__":
+    imp = ImprintAdapter()
+    imp.launch_imprint_adapter()
         
         
         

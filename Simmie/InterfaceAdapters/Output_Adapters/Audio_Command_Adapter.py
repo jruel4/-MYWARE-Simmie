@@ -33,16 +33,28 @@ class AudioCommandAdapter:
     AMCommands = list(range(33,63))
     OscillatorUncoupledCommands = list(range(63,67))
     
-    def __init__(self):        
+    def __init__(self, name='', uid=000):
         self.command_set = list()
-        self.info = StreamInfo('MartianWearables', 'AudioCommands', 4, 4, 'int32', 'AudioCommandUID002')
+        self.info = StreamInfo('ACA_' + name, 'AudioCommands', 4, 4, 'int32', 'ACA_UID' + str(uid))
         self.outlet = StreamOutlet(self.info)
-        
+        print("Creating audio command output stream: ACA_" + name + " with ID: ACA_UID" + str(uid))
+
     def get_valid_audio_commands(self):
         return  AudioCommandAdapter.DynamicsCommands +\
                 AudioCommandAdapter.FMCommands +\
                 AudioCommandAdapter.AMCommands +\
                 AudioCommandAdapter.OscillatorUncoupledCommands
+                
+                
+#==============================================================================
+#     def open_outlet(self):
+#         print("Creating audio command output stream: ACA_" + name + " with ID: ACA_UID" + str(uid))
+#         self.info = StreamInfo('ACA_' + name, 'AudioCommands', 4, 4, 'int32', 'ACA_UID' + str(uid))
+#         self.outlet = StreamOutlet(self.info)
+# 
+#==============================================================================
+    def close(self):
+        del self.outlet
 
     def submit_command(self, command_idx):
         '''
