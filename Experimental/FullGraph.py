@@ -37,7 +37,7 @@ print("Continuing.")
 
 
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\Experimental\Logs\\'
-G_logdir = G_logs + 'S2\\'
+G_logdir = G_logs + 'S5\\'
 #time.strftime("%m-%d_%H.%M_")
 
 checkpoint_file = G_logdir + 'model.ckpt'
@@ -62,7 +62,7 @@ with tf.name_scope("in"):
 ##
 tgt_output_units = shape_rpv[1]
 tgt_layers = [50,50,tgt_output_units]
-tgt_lr = 1e-6
+tgt_lr = 1e-2
 with tf.name_scope("tgt") as tgt_scope:
 
     tgt_dense0 = tf.contrib.layers.fully_connected(inputs=in_eeg_features, num_outputs=tgt_layers[0], activation_fn=tf.sigmoid,scope='tgt_dense0')
@@ -116,7 +116,7 @@ with tf.name_scope("pv"):
 ##
 val_tgt_weights = tf.constant([-1.,1.],dtype=tf.float32) #weight the output of tgt_out_softmax in calculating value
 val_discount_rate = tf.constant(0.9)
-val_lr = 1e-6
+val_lr = 1e-1
 val_output_units = 1
 
 with tf.name_scope("val"):
@@ -162,8 +162,8 @@ with tf.name_scope("val"):
 # Policy parameters
 ##
 pol_output_units = pv_layers[-1]
-pol_imp_lr = 8e-7
-pol_rl_lr = 8e-7
+pol_imp_lr = 5e-2
+pol_rl_lr = 5e-2
 
 with tf.name_scope("pol"):
     with tf.name_scope("predict"):
@@ -332,20 +332,22 @@ imp_training_lbls = empty_act
 tgt_training_data = empty_data
 tgt_training_lbls = empty_rpv
 rl_training_data = empty_data
-tgt_minimum_batch_size = 10
-imp_minimum_batch_size = 25
-rl_minimum_batch_size = 25
+tgt_minimum_batch_size = 5
+imp_minimum_batch_size = 10
+rl_minimum_batch_size = 10
 
 # Intervals - all in seconds!
 interval_send_command = 0.1 # time to send all commands
-interval_console_output = 2.5
-interval_summary_writer = 2.5
+interval_console_output = 1.0
+interval_summary_writer = 0.1
 interval_graph_saver = 60.0
 
 # Timerkeepers / timers
 timekeep_send_command = time.time()
 timekeep_console_output = time.time()
 timekeep_summary_writer = time.time()
+timekeep_summary_writer1 = time.time()
+timekeep_summary_writer2 = time.time()
 timekeep_graph_saver = time.time()
 
 timekeep_beginning = time.time()
@@ -354,6 +356,8 @@ timekeep_beginning = time.time()
 do_sendcommand = True
 do_console = True
 do_summaries = True
+do_summaries1 = True
+do_summaries2 = True
 do_save = False
 
 # Logging
@@ -388,11 +392,6 @@ try:
     while(True):
         loop_idx += 1
         
-        timekeep_send_command   ,   do_sendcommand   = check_timekeep(timekeep_send_command,    interval_send_command)
-        timekeep_console_output ,   do_console       = check_timekeep(timekeep_console_output,  interval_console_output)
-        timekeep_summary_writer ,   do_summaries     = check_timekeep(timekeep_summary_writer,  interval_summary_writer)
-        timekeep_graph_saver    ,   do_save          = check_timekeep(timekeep_graph_saver,     interval_graph_saver)
-        
         # Get new data from adapters
         raw_data, tgt_data, tgt_lbls, imp_data, imp_lbls  = INPUT.retrieve_latest_data()
     
@@ -403,7 +402,7 @@ try:
         else:
             # imp_data / rpv_data should NEVER contain any data if raw_data is empty
             # should be safe to skip
-            continue 
+            continue
     
         # Send output commands if they have not been sent in this interval
         if do_sendcommand:
@@ -411,7 +410,6 @@ try:
                 act_out = pol_predict(sess, summary_writer, raw_data[-1,None])['prediction'][0] # TODO, Ok to send states like this?
                 OUTPUT.submit_command_relaxed(act_out)
             cmds_sent += 1
-            do_sendcommand = False
     
         # Load training data if any is present
         if len(imp_data) > 0:
@@ -431,9 +429,7 @@ try:
             policy_rl_train_info = pol_rl_train(sess, summary_writer, rl_training_data)
             value_train_info = val_train(sess, summary_writer, rl_training_data)
             rl_training_data = empty_data
-            
-            
-            # Write training summaries
+            timekeep_summary_writer ,   do_summaries     = check_timekeep(timekeep_summary_writer,  interval_summary_writer)
             if do_summaries:
                 summary_writer.add_summary(policy_rl_train_info['summaries'], global_step=policy_rl_train_info['step'])
                 summary_writer.add_summary(value_train_info['summaries'], global_step=value_train_info['step'])
@@ -443,31 +439,39 @@ try:
             policy_imp_train_info = pol_imp_train(sess, summary_writer, imp_training_data,imp_training_lbls)
             imp_training_data = empty_data
             imp_training_lbls = empty_act
-            if do_summaries:
+            timekeep_summary_writer1 ,   do_summaries1     = check_timekeep(timekeep_summary_writer1,  interval_summary_writer)
+            if do_summaries1:
                 summary_writer.add_summary(policy_imp_train_info['summaries'], global_step=policy_imp_train_info['step'])
-    
+
+
+
         if len(tgt_training_data) >= tgt_minimum_batch_size:
             tgt_train_info = tgt_train(sess, summary_writer, tgt_training_data, tgt_training_lbls)
             tgt_training_data = empty_data
             tgt_training_lbls = empty_rpv
-            if do_summaries:
+            timekeep_summary_writer2 ,   do_summaries2     = check_timekeep(timekeep_summary_writer2,  interval_summary_writer)
+            if do_summaries2:
                 summary_writer.add_summary(tgt_train_info['summaries'], global_step=tgt_train_info['step'])
-    
+
+
         if do_console:
-            print("Single loop took: ", time.time() - timekeep_console_output,
+            print("Single loop took: %.5f" % (time.time() - timekeep_console_output),
                   ", loop number: ", loop_idx,
                   ", cmds sent: ", cmds_sent,
-                  ", t-0: ", time.time() - timekeep_beginning)
-            do_console = False
-    
-        if False and do_save:
+                  ", t-0: %.4f" % (time.time() - timekeep_beginning))
+            summary_writer.flush()
+
+        if do_save:
             print("Saving checkpoint")
             saver.save(sess, checkpoint_file, global_step=loop_idx)
-            do_save = False
-        do_sendcommand = False
-        do_summaries = False
+
+        timekeep_graph_saver    ,   do_save          = check_timekeep(timekeep_graph_saver,     interval_graph_saver)
+        timekeep_send_command   ,   do_sendcommand   = check_timekeep(timekeep_send_command,    interval_send_command)
+        timekeep_console_output ,   do_console       = check_timekeep(timekeep_console_output,  interval_console_output)
+
 
 except KeyboardInterrupt:
     print("Receieved interrupt")
     print("Saving checkpoint")
     saver.save(sess, checkpoint_file, global_step=loop_idx)
+    summary_writer.flush()
