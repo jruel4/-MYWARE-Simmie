@@ -12,6 +12,8 @@ EEG features will just be spectrogram at first.
 - 5 time points (10 seconds w/ 2 second epochs)
 - 30 frequencies
 - 16 channels
+
+- 2400 features per sample
 '''
 
 from threading import Thread, Event
@@ -20,6 +22,9 @@ import numpy as np
 
 from Imprint_Adapter import ImprintAdapter
 from Reward_Punish_Adapter import RewardPunishAdapter
+
+#TODO when to call sync? how much data to cache? its synchronous so we can be consistent right?
+#TODO decide when to clear eeg_data_cache
 
 class EEGStateAdapter:
     
@@ -50,20 +55,35 @@ class EEGStateAdapter:
         '''
         
         # Sync rpv data
-        rpv_data = self.rpvAdapter.get_data()
+        self.rpv_data,ts_diffs = self.sync_data( self.eeg_data_cache,  self.rpvAdapter.get_data())
+        
+        # Sync Imprint data
+        self.imprint_data,ts_diffs = self.sync_data( self.eeg_data_cache,  self.imprintAdapter.get_data())  
         
         
-        
-    def retrieve_latest_eeg_state(self):
-        #TODO what numpy format is good?
-        #TODO check with John - since we are synchronous now, just update every state?
-        #TODO actually should probably collect more than the non-overlapping epochs
-        #TODO in order to have more training data...? 
+    def retrieve_latest_data(self):
+        '''
+        For V,F - T,F - V,B - PI,B
+        '''
         if len(self.eeg_data_cache) > 0:
-            latest_state, timestamp = self.eeg_data_cache.pop()
-            return np.asarray(latest_state)
+            
+            # Sync timestamps
+            self.sync_state_labels()
+    
+            # remove timestamps from eeg data
+            eeg_data = np.asarray([d[0] for d in self.eeg_data_cache])
+            
+            # setup structure for tensorflow model
+            data = eeg_data, np.asarray(self.rpv_data), np.asarray(self.imprint_data)
+            
+            # clear caches
+            self.rpv_data = list()
+            self.imprint_data = list()
+            self.eeg_data_cache = list()
+            
+            return data
         else:
-            return False 
+            return (None, None, None) 
     
     def launch_eeg_adapter(self, manual_stream_select=True): 
         streams = resolve_stream('type', 'AudioCommands')
@@ -103,58 +123,60 @@ class EEGStateAdapter:
                 self.eeg_data_cache += [(eeg_power, timestamps)]
             
             
-def sync_data(_inputs, labels):
-    '''
-    assume inputs and labels both lists of tuples with first val value, second val timestamp.
-    
-    assume we have many more inputs than labels
-    
-    strategy is to search for the closest label for each input, also we can only,
-    use one input per label so if the next closest is further than a removed one 
-    then we would like to collect statistics on that.
-    
-    '''   
-    
-    ts_diffs = []    
-    synced_pairs = []
-             
-    # copy inputs
-    inputs = list(_inputs)
-    
-    # loop over labels to find closest input
-    for label in labels:
+    def sync_data(self, _inputs, labels):
+        '''
+        assume inputs and labels both lists of tuples with first val value, second val timestamp.
         
-        # extract timestamps to array
-        inputs_ts = np.asarray([i[1] for i in inputs])
+        assume we have many more inputs than labels
         
-        # extract label ts
-        label_ts = label[1]
+        strategy is to search for the closest label for each input, also we can only,
+        use one input per label so if the next closest is further than a removed one 
+        then we would like to collect statistics on that.
         
-        # find nearest input to label
-        inputs_ts = abs( inputs_ts - label_ts )
-        amin = np.argmin(inputs_ts)
-        closest_input = inputs[amin][0]
+        '''   
         
-        # collect metrics
-        ts_diffs += [inputs_ts[amin]]
+        ts_diffs = []    
+        synced_pairs = []
+                 
+        # copy inputs
+        inputs = list(_inputs)
         
-        # add pair
-        synced_pairs += [(closest_input, label[0])] 
+        # loop over labels to find closest input
+        for label in labels:
+            
+            # extract timestamps to array
+            inputs_ts = np.asarray([i[1] for i in inputs])
+            
+            # extract label ts
+            label_ts = label[1]
+            
+            # find nearest input to label
+            inputs_ts = abs( inputs_ts - label_ts )
+            amin = np.argmin(inputs_ts)
+            closest_input = inputs[amin][0]
+            
+            # collect metrics
+            ts_diffs += [inputs_ts[amin]]
+            
+            # add pair
+            synced_pairs += [(closest_input, label[0])] 
+            
+            # delete used input
+            del inputs[amin]
+            
+        return synced_pairs, ts_diffs
         
-        # delete used input
-        del inputs[amin]
-        
-    return synced_pairs, ts_diffs
-        
-if __name__ == '__main__':
-    
-    # create fake input and lable data
-    fake_input = [(i+.01,i+.02) for i in range(10)] + [(666,0),(666,4.0)]      
-    fake_label = [(i,i) for i in range(10)]
-    
-    print(sync_data(fake_input, fake_label))
-        
-    
+#==============================================================================
+# if __name__ == '__main__':
+#     
+#     # create fake input and lable data
+#     fake_input = [(i+.01,i+.02) for i in range(10)] + [(666,0),(666,4.0)]      
+#     fake_label = [(i,i) for i in range(10)]
+#     
+#     print(sync_data(fake_input, fake_label))
+#         
+#     
+#==============================================================================
     
     
     
