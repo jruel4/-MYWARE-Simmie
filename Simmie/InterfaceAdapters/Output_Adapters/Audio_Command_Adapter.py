@@ -33,11 +33,16 @@ class AudioCommandAdapter:
     AMCommands = list(range(33,63))
     OscillatorUncoupledCommands = list(range(63,67))
     
-    def __init__(self, name='', uid=000):
+    def __init__(self, name='', uid=000, relaxed_enabled=False):
         self.command_set = list()
-        self.info = StreamInfo('ACA_' + name, 'AudioCommands', 4, 4, 'int32', 'ACA_UID' + str(uid))
+        self.info = StreamInfo('ACA_' + name, 'AudioCommands', 4, 1, 'int32', 'ACA_UID_' + str(uid))
         self.outlet = StreamOutlet(self.info)
-        print("Creating audio command output stream: ACA_" + name + " with ID: ACA_UID" + str(uid))
+        print("Creating audio command output stream: ACA_" + name + " with ID: ACA_UID_" + str(uid))
+
+        if relaxed_enabled:
+            self.info_relax = StreamInfo('ACA_RELAX_' + name, 'AudioCommands', 1, 1, 'int32', 'ACA_RELAX_UID_' + str(uid))
+            self.outlet_relax = StreamOutlet(self.info_relax)
+            print("Creating relaxed audio command output stream: ACA_RELAX_" + name + " with ID: ACA_RELAX_UID_" + str(uid))
 
     def get_valid_audio_commands(self):
         return  AudioCommandAdapter.DynamicsCommands +\
@@ -61,8 +66,7 @@ class AudioCommandAdapter:
         For 'relaxed' command criteria.
         '''
         if command_idx in range(70):
-            self.outlet.push_sample([command_idx])
-            
+            self.outlet_relax.push_sample([command_idx])
         else:
             print("ERROR: Command adapter received invalid id", command_idx)
             return False 

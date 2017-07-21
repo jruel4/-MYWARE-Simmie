@@ -35,14 +35,14 @@ class EEGStateAdapter:
         self.cache_interval = int(samples_per_output)
         self.eeg_thread_event = Event()
         self.eeg_data_cache = list()
-        self.eeg_fifo = deque(np.zeros([(eeg_feed_rate*spectrogram_timespan), n_chan * n_freq]), maxlen=self.eeg_fifo_len)
+        self.eeg_fifo = deque([], maxlen=self.eeg_fifo_len)
         
         # Init other adapters
         self.imprintAdapter = ImprintAdapter(dbg=True)
         self.rpvAdapter = RewardPunishAdapter(dbg=True)
         
-        self.rpvDataSynced = list()
-        self.imprintDataSynced = list()
+        self.rpv_data_dict = dict()
+        self.imprint_data_dict = dict()
         
     def sync_state_labels(self):
         '''
@@ -58,10 +58,10 @@ class EEGStateAdapter:
         '''
         
         # Sync rpv data
-        self.rpv_data,ts_diffs = self.sync_data( self.eeg_data_cache,  self.rpvAdapter.get_data())
+        self.rpv_data_dict = self.sync_data( self.eeg_data_cache,  self.rpvAdapter.get_data())
         
         # Sync Imprint data
-        self.imprint_data,ts_diffs = self.sync_data( self.eeg_data_cache,  self.imprintAdapter.get_data())  
+        self.imprint_data_dict = self.sync_data( self.eeg_data_cache,  self.imprintAdapter.get_data())  
         
         
     def retrieve_latest_data(self):
@@ -78,14 +78,25 @@ class EEGStateAdapter:
             eeg_data = np.asarray([d[0] for d in self.eeg_data_cache])
             
             # setup structure for tensorflow model
-            data = eeg_data, np.asarray(self.rpv_data), np.asarray(self.imprint_data)
+            
+            rpv_inputs = np.asarray(self.rpv_data_dict['inputs'])
+            rpv_labels = np.asarray(self.rpv_data_dict['labels'])
+            
+            assert rpv_inputs.shape[0] == rpv_labels.shape[0] #TODO error string here
+            
+            imp_inputs = np.asarray(self.imprint_data_dict['inputs'])
+            imp_labels = np.asarray(self.imprint_data_dict['labels'])    #TODO error
+            
+            assert imp_inputs.shape[0] == imp_labels.shape[0]
+            
+            data = eeg_data, rpv_inputs, rpv_labels, imp_inputs, imp_labels
             
             # clear caches
             self.clear_caches()
             
             return data
         else:
-            return (None, None, None) 
+            return ([], [], [], [], []) 
     
     def launch_eeg_adapter(self, manual_stream_select=True):
         
@@ -111,8 +122,8 @@ class EEGStateAdapter:
         self.eeg_thread_event.clear()
         
     def clear_caches(self, clear_subadapters=False):
-        self.rpv_data = list()
-        self.imprint_data = list()
+        self.rpv_data_dict = dict()
+        self.imprint_data_dict = dict()
         self.eeg_data_cache = list()
         if clear_subadapters:
             self.rpvAdapter.get_data()
@@ -141,7 +152,7 @@ class EEGStateAdapter:
             rx_counter += 1
             
             # cache if apt.
-            if rx_counter % self.cache_interval == 0:
+            if (len(self.eeg_fifo) == self.eeg_fifo_len) and (rx_counter % self.cache_interval == 0):
                 self.eeg_data_cache += [(np.asarray(self.eeg_fifo)[fifo_idx,:], timestamp)]
             
             
@@ -158,10 +169,12 @@ class EEGStateAdapter:
         '''   
         
         ts_diffs = []    
-        synced_pairs = []
+        synced_inputs = []
+        synced_outputs = []
                  
         # copy inputs
         inputs = list(_inputs)
+        previously_used = list()
         
         # loop over labels to find closest input
         for label in labels:
@@ -175,18 +188,25 @@ class EEGStateAdapter:
             # find nearest input to label
             inputs_ts = abs( inputs_ts - label_ts )
             amin = np.argmin(inputs_ts)
+
+            # check if the value at this index has been used before; if so, skip the label (undefined behaviour)
+            if amin in previously_used: continue
+            previously_used.append(amin)
+
             closest_input = inputs[amin][0]
             
             # collect metrics
             ts_diffs += [inputs_ts[amin]]
             
             # add pair
-            synced_pairs += [(closest_input, label[0])] 
+            #synced_pairs += [(closest_input, label[0])] 
+            synced_inputs += [closest_input]
+            synced_outputs += [label[0]]
             
             # delete used input
-            del inputs[amin]
+#            del inputs[amin]
             
-        return synced_pairs, ts_diffs
+        return {'inputs': synced_inputs, 'labels': synced_outputs, 'diffs': ts_diffs}
         
 if __name__ == '__main__':
     

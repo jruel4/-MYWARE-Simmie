@@ -11,22 +11,36 @@ import numpy as np
 
 from Simmie.Simmie.InterfaceAdapters.Output_Adapters.Audio_Command_Adapter import AudioCommandAdapter
 from Simmie.Simmie.InterfaceAdapters.Input_Adapters.EEG_State_Adapter import EEGStateAdapter
-OUTPUT = AudioCommandAdapter(name="Simmie", uid=np.random.randint(0,1e4))
-INPUT = EEGStateAdapter(n_freq=30, #should match with pipeline
-                        n_chan=8, #should match with pipeline
-                        eeg_feed_rate=10, #sps
-                        samples_per_output=1, # 
-                        spectrogram_timespan=10, #assumed to be in seconds
-                        n_spectrogram_timepoints=10)
 
 
+nchan = 8
+nfreqs = 30
+ntimepoints = 10
+
+OUTPUT = AudioCommandAdapter(
+        name="Simmie",
+        uid=np.random.randint(0,1e4),
+        relaxed_enabled=True)
+
+INPUT = EEGStateAdapter(
+        n_freq=nfreqs, #should match with pipeline
+        n_chan=nchan, #should match with pipeline
+        eeg_feed_rate=10, #sps
+        samples_per_output=1, # 
+        spectrogram_timespan=10, #assumed to be in seconds
+        n_spectrogram_timepoints=ntimepoints)
 
 
+_ = input("\nACA started, now start up audio control GUI...\nPress enter when ready.")
+print("Continuing.")
 
 
 
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\Experimental\Logs\\'
-G_logdir = G_logs + 'A40\\'
+G_logdir = G_logs + 'S2\\'
+#time.strftime("%m-%d_%H.%M_")
+
+checkpoint_file = G_logdir + 'model.ckpt'
 
 '''
 
@@ -34,7 +48,7 @@ All input parameters the next receives
 
 '''
 naudio_commands = len(OUTPUT.get_valid_audio_commands())
-shape_eeg_feat = [None,1,30 * 10 * 8]
+shape_eeg_feat = [None,1,nfreqs * ntimepoints * nchan]
 shape_rpv = [None,2]
 shape_act = [None,naudio_commands]
 
@@ -202,8 +216,8 @@ def one_hot(idx, total, batch_size=1):
 def spoof_data(batch_size=1):
     return np.random.randn(batch_size,shape_eeg_feat[1],shape_eeg_feat[2])
 def spoof_act(batch_size=1):
-    acts = [ np.random.randint(0,60) for x in range(batch_size)]
-    return one_hot(acts,60,batch_size)
+    acts = [ np.random.randint(0,naudio_commands) for x in range(batch_size)]
+    return one_hot(acts,naudio_commands,batch_size)
 def spoof_rpv(batch_size=1):
     rpvs = [ np.random.randint(0,2) for x in range(batch_size)]
     return one_hot(rpvs, shape_rpv[1], batch_size)
@@ -298,27 +312,35 @@ sess = tf.Session()
 summary_writer = tf.summary.FileWriter(G_logdir, sess.graph)
 sess.run(tf.global_variables_initializer())
 
-tgt_predict(sess,summary_writer,spoof_data(1000),'TGT_PRED_TST')
-pol_predict(sess,summary_writer,spoof_data(1000),'POL_PRED_TST')
-tgt_train(sess,summary_writer,spoof_data(1000),spoof_rpv(1000),'TGT_TRN_TST')
-val_train(sess,summary_writer,spoof_data(1000),'VAL_TRN_TST')
-pol_imp_train(sess,summary_writer,spoof_data(1000),spoof_act(1000),'POL_IMP_TRN_TST')
-pol_rl_train(sess,summary_writer,spoof_data(1000),'POL_RL_TRN_TST')
+#==============================================================================
+# tgt_predict(sess,summary_writer,spoof_data(1000),'TGT_PRED_TST')
+# pol_predict(sess,summary_writer,spoof_data(1000),'POL_PRED_TST')
+# tgt_train(sess,summary_writer,spoof_data(1000),spoof_rpv(1000),'TGT_TRN_TST')
+# val_train(sess,summary_writer,spoof_data(1000),'VAL_TRN_TST')
+# pol_imp_train(sess,summary_writer,spoof_data(1000),spoof_act(1000),'POL_IMP_TRN_TST')
+# pol_rl_train(sess,summary_writer,spoof_data(1000),'POL_RL_TRN_TST')
+#==============================================================================
 
+# Empty data structures
+empty_data = np.empty([0,1,nfreqs * ntimepoints * nchan])
+empty_rpv = np.empty([0,shape_rpv[1]])
+empty_act = np.empty([0,naudio_commands])
 
 # Batching
-imp_training_data = list()
-tgt_training_data = list()
-rl_training_data = list()
+imp_training_data = empty_data
+imp_training_lbls = empty_act
+tgt_training_data = empty_data
+tgt_training_lbls = empty_rpv
+rl_training_data = empty_data
 tgt_minimum_batch_size = 10
 imp_minimum_batch_size = 25
 rl_minimum_batch_size = 25
 
 # Intervals - all in seconds!
-interval_send_command = 1.0 # time to send all commands
+interval_send_command = 0.1 # time to send all commands
 interval_console_output = 2.5
 interval_summary_writer = 2.5
-interval_graph_saver = 60
+interval_graph_saver = 60.0
 
 # Timerkeepers / timers
 timekeep_send_command = time.time()
@@ -327,6 +349,12 @@ timekeep_summary_writer = time.time()
 timekeep_graph_saver = time.time()
 
 timekeep_beginning = time.time()
+
+# Bools
+do_sendcommand = True
+do_console = True
+do_summaries = True
+do_save = False
 
 # Logging
 cmds_sent = 0
@@ -344,7 +372,8 @@ INPUT.launch_eeg_adapter()
 # input timekeep and interval, return (is_beeping, new_timekeep)
 def check_timekeep(timekeep, interval):
     is_beeping = ((time.time() - timekeep) > interval)
-    return (is_beeping, time.time() if is_beeping else timekeep)
+    if is_beeping: timekeep = time.time()
+    return timekeep, is_beeping
 
 
 #==============================================================================
@@ -355,70 +384,90 @@ def check_timekeep(timekeep, interval):
 # !!!!!!!!!
 #==============================================================================
 
-while(True):
-    loop_idx += 1
-    
-    timekeep_send_command   ,   do_sendcommand   = check_timekeep(timekeep_send_command,    interval_send_command)
-    timekeep_console_output ,   do_console       = check_timekeep(timekeep_console_output,  interval_console_output)
-    timekeep_summary_writer ,   do_summaries     = check_timekeep(timekeep_summary_writer,  interval_summary_writer)
-    timekeep_graph_saver    ,   do_save          = check_timekeep(timekeep_graph_saver,     interval_graph_saver)
-    
-    # Get new data from adapters
-    raw_data, imp_data, tgt_data = INPUT.retrieve_latest_data()
-
-    # Check if actually got any data
-    if raw_data != None:
-        rl_training_data.append(raw_data)
-    else:
-        # imp_data / rpv_data should NEVER contain any data if raw_data is empty
-        # should be safe to skip
-        continue 
-
-    # Send output commands if they have not been sent in this interval
-    if do_sendcommand:
-        for i in range(4):
-            act_out = pol_predict(sess, summary_writer, raw_data[None,0,None,:])['prediction'] # TODO, Ok to send states like this?
-            OUTPUT.submit_command(act_out)
-        cmds_sent += 1
-        do_sendcommand = False
-
-    # Load training data if any is present
-    if imp_data != None: imp_training_data.append(imp_data)
-    if tgt_data != None: tgt_training_data.append(tgt_data)
-
-    
-    # Check to see if we have enough data to train
-    if len(rl_training_data) >= rl_minimum_batch_size:
-        policy_rl_train_info = pol_rl_train(sess, summary_writer, rl_training_data)
-        value_train_info = val_train(sess, summary_writer, rl_training_data)
-        raw_data = list() 
+try:
+    while(True):
+        loop_idx += 1
         
-        # Write training summaries
-        if do_summaries:
-            summary_writer.add_summary(policy_rl_train_info['summaries'], global_step=policy_rl_train_info['step'])
-            summary_writer.add_summary(value_train_info['summaries'], global_step=value_train_info['step'])
-
-
-    if len(imp_training_data) >= imp_minimum_batch_size:
-        policy_imp_train_info = pol_imp_train(sess, summary_writer, imp_training_data)
-        imp_training_data = list()
-        if do_summaries:
-            summary_writer.add_summary(policy_imp_train_info['summaries'], global_step=policy_imp_train_info['step'])
-
-    if len(tgt_training_data) >= tgt_minimum_batch_size:
-        tgt_train_info = tgt_train(sess, summary_writer, tgt_training_data)
-        tgt_training_data = list()
-        if do_summaries:
-            summary_writer.add_summary(tgt_train_info['summaries'], global_step=tgt_train_info['step'])
-
-    if do_console:
-        print("Single loop took: ", time.time() - timekeep_console_output,
-              ", loop number: ", loop_idx,
-              ", cmds sent: ", cmds_sent)
-        do_console = False
-
-    if do_save:
-        print("Saving checkpoint")
-        checkpoint_file = G_logdir + 'model.ckpt'
-        saver.save(sess, checkpoint_file, global_step=loop_idx)
+        timekeep_send_command   ,   do_sendcommand   = check_timekeep(timekeep_send_command,    interval_send_command)
+        timekeep_console_output ,   do_console       = check_timekeep(timekeep_console_output,  interval_console_output)
+        timekeep_summary_writer ,   do_summaries     = check_timekeep(timekeep_summary_writer,  interval_summary_writer)
+        timekeep_graph_saver    ,   do_save          = check_timekeep(timekeep_graph_saver,     interval_graph_saver)
+        
+        # Get new data from adapters
+        raw_data, tgt_data, tgt_lbls, imp_data, imp_lbls  = INPUT.retrieve_latest_data()
     
+        # Check if actually got any data
+        if len(raw_data) > 0:
+            raw_data = np.reshape(raw_data,(-1,1, ntimepoints * nchan * nfreqs))
+            rl_training_data = np.concatenate((rl_training_data,raw_data))
+        else:
+            # imp_data / rpv_data should NEVER contain any data if raw_data is empty
+            # should be safe to skip
+            continue 
+    
+        # Send output commands if they have not been sent in this interval
+        if do_sendcommand:
+            for i in range(4):
+                act_out = pol_predict(sess, summary_writer, raw_data[-1,None])['prediction'][0] # TODO, Ok to send states like this?
+                OUTPUT.submit_command_relaxed(act_out)
+            cmds_sent += 1
+            do_sendcommand = False
+    
+        # Load training data if any is present
+        if len(imp_data) > 0:
+            imp_data = np.reshape(imp_data,(-1,1, ntimepoints * nchan * nfreqs))
+            imp_lbls = one_hot(imp_lbls, naudio_commands, len(imp_lbls))#[:,None,:]
+            imp_training_data = np.concatenate((imp_training_data,imp_data))
+            imp_training_lbls = np.concatenate((imp_training_lbls,imp_lbls))
+
+        if len(tgt_data) > 0:
+            tgt_data = np.reshape(tgt_data,(-1,1, ntimepoints * nchan * nfreqs))
+            tgt_training_data = np.concatenate((tgt_training_data,tgt_data))
+            tgt_training_lbls = np.concatenate((tgt_training_lbls,tgt_lbls))
+    
+        
+        # Check to see if we have enough data to train
+        if len(rl_training_data) >= rl_minimum_batch_size:
+            policy_rl_train_info = pol_rl_train(sess, summary_writer, rl_training_data)
+            value_train_info = val_train(sess, summary_writer, rl_training_data)
+            rl_training_data = empty_data
+            
+            
+            # Write training summaries
+            if do_summaries:
+                summary_writer.add_summary(policy_rl_train_info['summaries'], global_step=policy_rl_train_info['step'])
+                summary_writer.add_summary(value_train_info['summaries'], global_step=value_train_info['step'])
+    
+    
+        if len(imp_training_data) >= imp_minimum_batch_size:
+            policy_imp_train_info = pol_imp_train(sess, summary_writer, imp_training_data,imp_training_lbls)
+            imp_training_data = empty_data
+            imp_training_lbls = empty_act
+            if do_summaries:
+                summary_writer.add_summary(policy_imp_train_info['summaries'], global_step=policy_imp_train_info['step'])
+    
+        if len(tgt_training_data) >= tgt_minimum_batch_size:
+            tgt_train_info = tgt_train(sess, summary_writer, tgt_training_data, tgt_training_lbls)
+            tgt_training_data = empty_data
+            tgt_training_lbls = empty_rpv
+            if do_summaries:
+                summary_writer.add_summary(tgt_train_info['summaries'], global_step=tgt_train_info['step'])
+    
+        if do_console:
+            print("Single loop took: ", time.time() - timekeep_console_output,
+                  ", loop number: ", loop_idx,
+                  ", cmds sent: ", cmds_sent,
+                  ", t-0: ", time.time() - timekeep_beginning)
+            do_console = False
+    
+        if False and do_save:
+            print("Saving checkpoint")
+            saver.save(sess, checkpoint_file, global_step=loop_idx)
+            do_save = False
+        do_sendcommand = False
+        do_summaries = False
+
+except KeyboardInterrupt:
+    print("Receieved interrupt")
+    print("Saving checkpoint")
+    saver.save(sess, checkpoint_file, global_step=loop_idx)
