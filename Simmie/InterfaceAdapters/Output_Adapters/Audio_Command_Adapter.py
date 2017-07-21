@@ -56,6 +56,17 @@ class AudioCommandAdapter:
     def close(self):
         del self.outlet
 
+    def submit_command_relaxed(self, command_idx):
+        '''
+        For 'relaxed' command criteria.
+        '''
+        if command_idx in range(70):
+            self.outlet.push_sample([command_idx])
+            
+        else:
+            print("ERROR: Command adapter received invalid id", command_idx)
+            return False 
+
     def submit_command(self, command_idx):
         '''
         To be called by policy client after outputing a command each time.
