@@ -37,6 +37,12 @@ class AudioCommandAdapter:
         self.command_set = list()
         self.info = StreamInfo('MartianWearables', 'AudioCommands', 4, 4, 'int32', 'AudioCommandUID002')
         self.outlet = StreamOutlet(self.info)
+        
+    def get_valid_audio_commands(self):
+        return  AudioCommandAdapter.DynamicsCommands +\
+                AudioCommandAdapter.FMCommands +\
+                AudioCommandAdapter.AMCommands +\
+                AudioCommandAdapter.OscillatorUncoupledCommands
 
     def submit_command(self, command_idx):
         '''
@@ -74,11 +80,11 @@ if __name__ == "__main__":
     # test good data
     good = [1,30,34,65]
     for v in good:
-        print adapter.submit_command(v)
+        print(adapter.submit_command(v))
     
     bad = [17,30,2,65]
     for v in bad:
-        print adapter.submit_command(v)
+        print(adapter.submit_command(v))
     
         
 

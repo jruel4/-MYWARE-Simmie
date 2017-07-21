@@ -19,20 +19,23 @@ EEG features will just be spectrogram at first.
 from threading import Thread, Event
 from pylsl import StreamInfo, StreamOutlet, StreamInlet, resolve_stream
 import numpy as np
+from collections import deque
 
-from Imprint_Adapter import ImprintAdapter
-from Reward_Punish_Adapter import RewardPunishAdapter
-
-#TODO when to call sync? how much data to cache? its synchronous so we can be consistent right?
-#TODO decide when to clear eeg_data_cache
+from Simmie.Simmie.InterfaceAdapters.Input_Adapters.Imprint_Adapter import ImprintAdapter
+from Simmie.Simmie.InterfaceAdapters.Input_Adapters.Reward_Punish_Adapter import RewardPunishAdapter
 
 class EEGStateAdapter:
     
-    def __init__(self, eeg_feed_rate=250, epoch_duration=2, num_features=30):
-        self.num_features = num_features
-        self.cache_interval = int(eeg_feed_rate*epoch_duration)
+    # n_timepoints 
+    def __init__(self, n_freq=30, n_chan=8, eeg_feed_rate=250, samples_per_output=1, spectrogram_timespan=10, n_spectrogram_timepoints=10):
+        self.num_channels = n_chan
+        self.num_freqs = n_freq
+        self.n_spectrogram_timepoints = n_spectrogram_timepoints
+        self.eeg_fifo_len = spectrogram_timespan * eeg_feed_rate #assuming spectrogram_timespan is in seconds
+        self.cache_interval = int(samples_per_output)
         self.eeg_thread_event = Event()
         self.eeg_data_cache = list()
+        self.eeg_fifo = deque([[[0]*n_freq]*n_chan]*(eeg_feed_rate*n_spectrogram_timepoints), maxlen=self.eeg_fifo_len)
         
         # Init other adapters
         self.imprintAdapter = ImprintAdapter()
@@ -109,19 +112,23 @@ class EEGStateAdapter:
         '''
         
         rx_counter = 0
+        fifo_idx = np.linspace(0,self.eeg_fifo_len-1,self.num_spectrogram_timepoints).astype(int)
         while self.eeg_thread_event.isSet():
     
             # get command
-            eeg_power, timestamps = self.inlet.pull_sample()
+            eeg_periodo, timestamp = self.inlet.pull_sample()
             
-            assert len(eeg_power) == self.num_features
+            assert len(eeg_periodo) == self.num_channels * self.num_freqs #lsl output is flattened periodo
+            
+            # add new periodogram to fifo
+            self.eeg_fifo.append(eeg_periodo)
             
             # inc rx count
             rx_counter += 1
             
             # cache if apt.
             if rx_counter % self.cache_interval == 0:
-                self.eeg_data_cache += [(eeg_power, timestamps)]
+                self.eeg_data_cache += [(np.asarray(self.eeg_fifo)[fifo_idx,:,:], timestamp)]
             
             
     def sync_data(self, _inputs, labels):

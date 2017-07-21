@@ -11,22 +11,15 @@ import numpy as np
 
 from Simmie.Simmie.InterfaceAdapters.Output_Adapters.Audio_Command_Adapter import AudioCommandAdapter
 from Simmie.Simmie.InterfaceAdapters.Input_Adapters.EEG_State_Adapter import EEGStateAdapter
-OUTPUT = AudioCommandAdapter()
-INPUT = EEGStateAdapter(n_freq=30, #should match with pipeline
-                        n_chan=8, #should match with pipeline
-                        eeg_feed_rate=250, #sps
-                        samples_per_output=1, # 
-                        spectrogram_timespan=10, #assumed to be in seconds
-                        n_spectrogram_timepoints=10)
-
-naudio_commands = len(OUTPUT.get_valid_audio_commands())
-
-
-
-
+ACA = AudioCommandAdapter()
+naudio_commands = len(ACA.get_valid_audio_commands())
 
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\Experimental\Logs\\'
 G_logdir = G_logs + 'A39\\'
+
+
+
+
 
 '''
 
@@ -36,7 +29,7 @@ All input parameters the next receives
 
 shape_eeg_feat = [None,1,30 * 30 * 16]
 shape_rpv = [None,2]
-shape_act = [None,naudio_commands]
+shape_act = [None,60]
 
 with tf.name_scope("in"):
     in_eeg_features = tf.placeholder(tf.float32, shape=shape_eeg_feat, name="IN_EEG")
@@ -309,7 +302,7 @@ pol_rl_train(sess,summary_writer,spoof_data(1000),'POL_RL_TRN_TST')
 beg = time.time()
 
 b_size = 250
-t_steps = 1
+t_steps = 2500
 fd0 = spoof_data(1)
 fd = spoof_data(b_size)
 fa = spoof_act(b_size)
@@ -322,16 +315,14 @@ for i in range(t_steps):
     
     # state: nchan x nsamples x nfreq
     #   (chan, sample, None) if no data or bad data
-    # act_labels: nchan x nsamples x nfreqs nsamples
+    # act_labels: nsamples
+    #   each element is scalar corresponding to action taken
+    #   None if no action
     # rpv_labesl: nsamples x 2
     #   data format is one-hot (Bad, Good)
     #   (None,None) if no action
     
-    states, act_data, rpv_data = INPUT.retrieve_latest_data()
-
-    # We got nothin'
-    if states == None:
-        continue
+    states, act_labels, rpv_labels = eeg_state_adapter()
     
     act_out = pol_predict(sess, summary_writer, fd0)['prediction']
     
@@ -341,17 +332,14 @@ for i in range(t_steps):
         ...
     
     # batch size
-    if i % 250 == 0:
-    if len(rpv_train_set)
+    if i % 250:
         tgt_train(state_buf, act_labels)
             ...
         # reset buffers
         state_buf = list()
             ...
     
-    if DO_IMPRINT:
-        
-        s_pi = pol_imp_train(sess,summary_writer,fd,fa)
+    
     
     
 #    tgt_predict(sess,summary_writer,spoof_data(1))
@@ -361,7 +349,7 @@ for i in range(t_steps):
         beg = time.time()
         s_pr = pol_rl_train(sess,summary_writer,fd)
         s_v = val_train(sess,summary_writer,fd)
-
+        s_pi = pol_imp_train(sess,summary_writer,fd,fa)
         s_t = tgt_train(sess,summary_writer,fd,fr)
         
         beg1=  time.time()
