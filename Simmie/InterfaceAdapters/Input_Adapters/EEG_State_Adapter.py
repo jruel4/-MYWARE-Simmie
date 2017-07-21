@@ -62,6 +62,7 @@ class EEGStateAdapter:
         
         
     def retrieve_latest_data(self):
+
         '''
         For V,F - T,F - V,B - PI,B
         '''

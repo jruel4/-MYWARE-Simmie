@@ -10,7 +10,7 @@ import tensorflow as tf
 import numpy as np
 
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\Experimental\Logs\\'
-G_logdir = G_logs + 'A31\\'
+G_logdir = G_logs + 'A36\\'
 
 
 
@@ -38,7 +38,17 @@ tgt_output_units = shape_rpv[1]
 tgt_layers = [50,50,tgt_output_units]
 tgt_lr = 1e-6
 with tf.name_scope("tgt") as tgt_scope:
-    tgt_dense = tf.contrib.layers.stack(in_eeg_features, tf.contrib.layers.fully_connected, tgt_layers, weights_initializer=tf.constant_initializer(1), activation_fn=tf.sigmoid,scope='tgt_dense')
+
+    tgt_dense0 = tf.contrib.layers.fully_connected(inputs=in_eeg_features, num_outputs=tgt_layers[0], activation_fn=tf.sigmoid,scope='tgt_dense0')
+    tgt_dense1 = tf.contrib.layers.fully_connected(inputs=tgt_dense0, num_outputs=tgt_layers[1], activation_fn=tf.sigmoid,scope='tgt_dense1')
+    tgt_dense = tf.contrib.layers.fully_connected(inputs=tgt_dense1, num_outputs=tgt_layers[2], activation_fn=None,scope='tgt_dense2')
+
+
+
+#==============================================================================
+#     tgt_dense = tf.contrib.layers.stack(in_eeg_features, tf.contrib.layers.fully_connected, tgt_layers, weights_initializer=tf.constant_initializer(1), activation_fn=tf.sigmoid,scope='tgt_dense')
+#==============================================================================
+
     with tf.name_scope("predict"):
         tgt_out_softmax = tf.nn.softmax(tgt_dense, name="TGT_Softmax")
         tgt_out_predict = tf.arg_max(tgt_out_softmax, 1, name="TGT_Prediction") # TODO: which dimension is this over?
@@ -50,9 +60,11 @@ with tf.name_scope("tgt") as tgt_scope:
     tgt_train_op = tgt_optimizer.minimize(tgt_loss, global_step=tgt_step)
     
     with tf.name_scope('summaries'):
-        tf.summary.scalar("tgt_step", tgt_step)
-#        tf.summary.scalar("tgt_predict", tgt_out_predict)
-        tf.summary.scalar("tgt_loss", tgt_loss)
+        tgt_summaries = tf.summary.merge([
+#            tf.summary.scalar("tgt_step", tgt_step),
+#           tf.summary.scalar("tgt_predict", tgt_out_predict)
+            tf.summary.scalar("tgt_loss", tgt_loss)
+            ])
 
 
 ##
@@ -94,19 +106,32 @@ with tf.name_scope("val"):
     val_train_op = tgt_optimizer.minimize(val_loss, global_step=val_step)
 
     with tf.name_scope('summaries'):
-        tf.summary.scalar("val_step", val_step)
-        tf.summary.scalar("val_loss", val_loss[0,0])
-        tf.summary.scalar("val_prediction_error", val_prediction_error)
-        tf.summary.scalar("val_previous_predicted", val_previous_predicted)
-        tf.summary.scalar("val_current_reward", val_actual_reward)
-        tf.summary.scalar("val_next_predicted", val_next_predicted[0,0])
+        val_summaries = tf.summary.merge([
+#            tf.summary.scalar("val_step", val_step),
+            tf.summary.scalar("val_loss", val_loss[0,0]),
+            tf.summary.scalar("val_prediction_error", val_prediction_error),
+            tf.summary.scalar("val_previous_predicted", val_previous_predicted),
+            tf.summary.scalar("val_current_reward", val_actual_reward),
+            tf.summary.scalar("val_next_predicted", val_next_predicted[0,0]),
+        ])
 
     
     with tf.control_dependencies([val_loss]):
         val_assgn_op0 = val_previous_predicted.assign(val_next_predicted[0,0])
     
 
-
+#==============================================================================
+# # This gets the initial layer's weights and creates an image summary
+# with tf.name_scope("weight_images"):
+#     with tf.variable_scope("tgt_dense0",reuse=True):
+#         x=tf.get_variable("weights")
+#     y=tf.reshape(x, [-1,900,50,1])
+#     z=tf.summary.merge([ tf.summary.image('spect',y) ])
+#     q=sess.run(z)
+#     summary_writer.add_summary(q,global_step = 1000)
+#     print(tgt_dense0)
+#==============================================================================
+    
 
 ##
 # Policy parameters
@@ -121,8 +146,9 @@ with tf.name_scope("pol"):
         pol_out_predict = tf.arg_max(pol_out_softmax, 1, "POL_Prediction")
 
     with tf.name_scope("summaries"):
-        tf.summary.scalar("pol_prediction", pol_out_predict[0])
-    
+        pol_summaries = tf.summary.merge([
+            tf.summary.scalar("pol_prediction", pol_out_predict[0])
+        ])
     with tf.name_scope("pol_imp"):
         # imprinting
         pol_imp_step = tf.Variable(0, name='POLIMP_Step', trainable=False)
@@ -131,9 +157,10 @@ with tf.name_scope("pol"):
         pol_imp_train_op = tgt_optimizer.minimize(pol_imp_loss, global_step=pol_imp_step)
         
         with tf.name_scope('summaries'):
-            tf.summary.scalar("pol_imp_step", pol_imp_step)
-            tf.summary.scalar("pol_imp_loss", pol_imp_loss)
-
+            pol_imp_summaries = tf.summary.merge([
+#                tf.summary.scalar("polimp_step", pol_imp_step),
+                tf.summary.scalar("polimp_loss", pol_imp_loss)
+            ])
 
     with tf.name_scope("pol_unsup"):
         pol_unsup_step = tf.Variable(0, name='POLUNSUP_Step', trainable=False)
@@ -144,9 +171,10 @@ with tf.name_scope("pol"):
         pol_unsup_train_op = tgt_optimizer.minimize(pol_unsup_loss, global_step=pol_unsup_step, var_list=pol_variables)
     
         with tf.name_scope('summaries'):
-            tf.summary.scalar("pol_unsup_step", pol_unsup_step)
-            tf.summary.scalar("pol_unsup_loss", pol_unsup_loss[0,0])
-
+            pol_unsup_summaries = tf.summary.merge([
+#                tf.summary.scalar("polunsup_step", pol_unsup_step),
+                tf.summary.scalar("polunsup_loss", pol_unsup_loss[0,0])
+            ])
 
 ###
 # Summaries
@@ -205,7 +233,7 @@ def tgt_train(sess, writer, eeg_data, rpv, sessrun_name=''):
     fetch = {
             'train_op'  : tgt_train_op,
             'loss'      : tgt_loss,
-#            'summaries' : summary_op,
+            'summaries' : tgt_summaries,
             'step'      : tgt_step
             }
     return train(sess,writer,feed,fetch,sessrun_name)
@@ -216,7 +244,7 @@ def val_train(sess, writer, eeg_data, sessrun_name=''):
     fetch = {
             'train_op'  : val_train_op,
             'loss'      : val_loss,
-#            'summaries' : summary_op,
+            'summaries' : val_summaries,
             'step'      : val_step,
             'assgn_op'  : val_assgn_op0.op # assigns the new predicted value to the old predicted value
             }
@@ -238,7 +266,7 @@ def pol_imp_train(sess, writer, eeg_data, proctor_action, sessrun_name=''):
     fetch = {
             'train_op'  : pol_imp_train_op,
             'loss'      : pol_imp_loss,
-#            'summaries' : summary_op,
+            'summaries' : pol_imp_summaries,
             'step'      : pol_imp_step
             }
     return train(sess,writer,feed,fetch,sessrun_name)
@@ -248,7 +276,7 @@ def pol_unsup_train(sess, writer, eeg_data, sessrun_name=''):
     fetch = {
             'train_op'  : pol_unsup_train_op,
             'loss'      : pol_unsup_loss,
-#            'summaries' : summary_op,
+            'summaries' : pol_unsup_summaries,
             'step'      : pol_unsup_step
             }
     return train(sess,writer,feed,fetch,sessrun_name)
@@ -266,26 +294,26 @@ val_train(sess,summary_writer,spoof_data(1000),'VAL_TRN_TST')
 pol_imp_train(sess,summary_writer,spoof_data(1000),spoof_act(1000),'POL_IMP_TRN_TST')
 pol_unsup_train(sess,summary_writer,spoof_data(1000),'POL_UNSUP_TRN_TST')
 
-
 beg = time.time()
-for i in range(10):
+
+b_size = 1
+t_steps = 100
+for i in range(t_steps):
     
-    tgt_predict(sess,summary_writer,spoof_data(2500))
-    pol_predict(sess,summary_writer,spoof_data(2500))
-    tgt_train(sess,summary_writer,spoof_data(2500),spoof_rpv(2500))
-    val_train(sess,summary_writer,spoof_data(2500))
-    pol_imp_train(sess,summary_writer,spoof_data(2500),spoof_act(2500))
-    pol_unsup_train(sess,summary_writer,spoof_data(2500))
+    tgt_predict(sess,summary_writer,spoof_data(b_size))
+    pol_predict(sess,summary_writer,spoof_data(b_size))
+    s_t = tgt_train(sess,summary_writer,spoof_data(b_size),spoof_rpv(b_size))
+    s_v = val_train(sess,summary_writer,spoof_data(b_size))
+    s_pi = pol_imp_train(sess,summary_writer,spoof_data(b_size),spoof_act(b_size))
+    s_pu = pol_unsup_train(sess,summary_writer,spoof_data(b_size))
     
-    for j in range(1):
-        feed = {
-                    in_eeg_features    : spoof_data(),
-                    in_rpv             : spoof_rpv(),       
-                    in_action          : spoof_act()}
-        s = sess.run(summary_op, feed)
-        summary_writer.add_summary(s, global_step=i*2 + j)
+    summary_writer.add_summary(s_t['summaries'], global_step=s_t['step'])
+    summary_writer.add_summary(s_v['summaries'], global_step=s_v['step'])
+    summary_writer.add_summary(s_pi['summaries'], global_step=s_pi['step'])
+    summary_writer.add_summary(s_pu['summaries'], global_step=s_pu['step'])
     print(i, time.time() - beg)
+    beg = time.time()
 
 print("Saving checkpoint")
 checkpoint_file = G_logdir + 'model.ckpt'
-saver.save(sess, checkpoint_file, global_step=50)
+saver.save(sess, checkpoint_file, global_step=t_steps)
