@@ -43,6 +43,19 @@ class AudioCommandAdapter:
                 AudioCommandAdapter.FMCommands +\
                 AudioCommandAdapter.AMCommands +\
                 AudioCommandAdapter.OscillatorUncoupledCommands
+                
+    def submit_command_relaxed(self, command_idx):
+        '''
+        For 'relaxed' command criteria.
+        '''
+        
+        if command_idx in range(70):
+            self.outlet.push_sample([command_idx])
+            
+        else:
+            print("ERROR: Command adapter received invalid set")
+            self.command_set = list()
+            return False 
 
     def submit_command(self, command_idx):
         '''
