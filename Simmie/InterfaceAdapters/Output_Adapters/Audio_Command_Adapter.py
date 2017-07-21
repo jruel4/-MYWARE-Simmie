@@ -48,13 +48,11 @@ class AudioCommandAdapter:
         '''
         For 'relaxed' command criteria.
         '''
-        
         if command_idx in range(70):
             self.outlet.push_sample([command_idx])
             
         else:
-            print("ERROR: Command adapter received invalid set")
-            self.command_set = list()
+            print("ERROR: Command adapter received invalid id", command_idx)
             return False 
 
     def submit_command(self, command_idx):
