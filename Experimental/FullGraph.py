@@ -10,7 +10,7 @@ import tensorflow as tf
 import numpy as np
 
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\Experimental\Logs\\'
-G_logdir = G_logs + 'A34\\'
+G_logdir = G_logs + 'A36\\'
 
 
 
@@ -38,7 +38,17 @@ tgt_output_units = shape_rpv[1]
 tgt_layers = [50,50,tgt_output_units]
 tgt_lr = 1e-6
 with tf.name_scope("tgt") as tgt_scope:
-    tgt_dense = tf.contrib.layers.stack(in_eeg_features, tf.contrib.layers.fully_connected, tgt_layers, weights_initializer=tf.constant_initializer(1), activation_fn=tf.sigmoid,scope='tgt_dense')
+
+    tgt_dense0 = tf.contrib.layers.fully_connected(inputs=in_eeg_features, num_outputs=tgt_layers[0], activation_fn=tf.sigmoid,scope='tgt_dense0')
+    tgt_dense1 = tf.contrib.layers.fully_connected(inputs=tgt_dense0, num_outputs=tgt_layers[1], activation_fn=tf.sigmoid,scope='tgt_dense1')
+    tgt_dense = tf.contrib.layers.fully_connected(inputs=tgt_dense1, num_outputs=tgt_layers[2], activation_fn=None,scope='tgt_dense2')
+
+
+
+#==============================================================================
+#     tgt_dense = tf.contrib.layers.stack(in_eeg_features, tf.contrib.layers.fully_connected, tgt_layers, weights_initializer=tf.constant_initializer(1), activation_fn=tf.sigmoid,scope='tgt_dense')
+#==============================================================================
+
     with tf.name_scope("predict"):
         tgt_out_softmax = tf.nn.softmax(tgt_dense, name="TGT_Softmax")
         tgt_out_predict = tf.arg_max(tgt_out_softmax, 1, name="TGT_Prediction") # TODO: which dimension is this over?
@@ -51,7 +61,7 @@ with tf.name_scope("tgt") as tgt_scope:
     
     with tf.name_scope('summaries'):
         tgt_summaries = tf.summary.merge([
-            tf.summary.scalar("tgt_step", tgt_step),
+#            tf.summary.scalar("tgt_step", tgt_step),
 #           tf.summary.scalar("tgt_predict", tgt_out_predict)
             tf.summary.scalar("tgt_loss", tgt_loss)
             ])
@@ -97,7 +107,7 @@ with tf.name_scope("val"):
 
     with tf.name_scope('summaries'):
         val_summaries = tf.summary.merge([
-            tf.summary.scalar("val_step", val_step),
+#            tf.summary.scalar("val_step", val_step),
             tf.summary.scalar("val_loss", val_loss[0,0]),
             tf.summary.scalar("val_prediction_error", val_prediction_error),
             tf.summary.scalar("val_previous_predicted", val_previous_predicted),
@@ -110,8 +120,18 @@ with tf.name_scope("val"):
         val_assgn_op0 = val_previous_predicted.assign(val_next_predicted[0,0])
     
 
-with tf.name_scope("weight_images"):
-    print(tgt_dense)
+#==============================================================================
+# # This gets the initial layer's weights and creates an image summary
+# with tf.name_scope("weight_images"):
+#     with tf.variable_scope("tgt_dense0",reuse=True):
+#         x=tf.get_variable("weights")
+#     y=tf.reshape(x, [-1,900,50,1])
+#     z=tf.summary.merge([ tf.summary.image('spect',y) ])
+#     q=sess.run(z)
+#     summary_writer.add_summary(q,global_step = 1000)
+#     print(tgt_dense0)
+#==============================================================================
+    
 
 ##
 # Policy parameters
@@ -138,7 +158,7 @@ with tf.name_scope("pol"):
         
         with tf.name_scope('summaries'):
             pol_imp_summaries = tf.summary.merge([
-                tf.summary.scalar("polimp_step", pol_imp_step),
+#                tf.summary.scalar("polimp_step", pol_imp_step),
                 tf.summary.scalar("polimp_loss", pol_imp_loss)
             ])
 
@@ -152,7 +172,7 @@ with tf.name_scope("pol"):
     
         with tf.name_scope('summaries'):
             pol_unsup_summaries = tf.summary.merge([
-                tf.summary.scalar("polunsup_step", pol_unsup_step),
+#                tf.summary.scalar("polunsup_step", pol_unsup_step),
                 tf.summary.scalar("polunsup_loss", pol_unsup_loss[0,0])
             ])
 
