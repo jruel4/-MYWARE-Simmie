@@ -32,6 +32,7 @@ class ImprintAdapter:
     def __init__(self):
         self.command_thread_event = Event()
         self.imprint_data_cache = list()
+        self.COMMAND_SPACING = 0.004 # seconds
         
     def get_data(self):
         data = self.imprint_data_cache
@@ -63,10 +64,12 @@ class ImprintAdapter:
         while self.command_thread_event.isSet():
     
             # get command
-            command_set, timestamps = self.inlet.pull_sample()
+            command_set, timestamp = self.inlet.pull_sample()
             
-            # cache
-            self.imprint_data_cache += [(command_set, timestamps)]
+            # Parse command set into 4 distincy command
+            for i,command in enumerate(command_set):
+                # cache
+                self.imprint_data_cache += [(command, timestamp + (i*self.COMMAND_SPACING))]
             
         print("Exiting imprint adapter rx thread")
         
