@@ -21,6 +21,9 @@ import numpy as np
 from Imprint_Adapter import ImprintAdapter
 from Reward_Punish_Adapter import RewardPunishAdapter
 
+#TODO when to call sync? how much data to cache? its synchronous so we can be consistent right?
+#TODO decide when to clear eeg_data_cache
+
 class EEGStateAdapter:
     
     def __init__(self, eeg_feed_rate=250, epoch_duration=2, num_features=30):
@@ -50,15 +53,25 @@ class EEGStateAdapter:
         '''
         
         # Sync rpv data
-        rpv_data = self.rpvAdapter.get_data()
+        self.rpv_data,ts_diffs = self.sync_data( self.eeg_data_cache,  self.rpvAdapter.get_data())
         
+        # Sync Imprint data
+        self.imprint_data,ts_diffs = self.sync_data( self.eeg_data_cache,  self.imprintAdapter.get_data())  
+        
+    def retrieve_training_data(self):
+        '''
+        For training Policy and Target networks
+        '''
+        training_data = np.asarray(self.rpv_data), np.asarray(self.imprint_data)
+        self.rpv_data = list()
+        self.imprint_data = list()
+        return training_data
         
         
     def retrieve_latest_eeg_state(self):
-        #TODO what numpy format is good?
-        #TODO check with John - since we are synchronous now, just update every state?
-        #TODO actually should probably collect more than the non-overlapping epochs
-        #TODO in order to have more training data...? 
+        '''
+        For V,F - T,F - V,B - PI,B
+        '''
         if len(self.eeg_data_cache) > 0:
             latest_state, timestamp = self.eeg_data_cache.pop()
             return np.asarray(latest_state)
@@ -103,58 +116,60 @@ class EEGStateAdapter:
                 self.eeg_data_cache += [(eeg_power, timestamps)]
             
             
-def sync_data(_inputs, labels):
-    '''
-    assume inputs and labels both lists of tuples with first val value, second val timestamp.
-    
-    assume we have many more inputs than labels
-    
-    strategy is to search for the closest label for each input, also we can only,
-    use one input per label so if the next closest is further than a removed one 
-    then we would like to collect statistics on that.
-    
-    '''   
-    
-    ts_diffs = []    
-    synced_pairs = []
-             
-    # copy inputs
-    inputs = list(_inputs)
-    
-    # loop over labels to find closest input
-    for label in labels:
+    def sync_data(self, _inputs, labels):
+        '''
+        assume inputs and labels both lists of tuples with first val value, second val timestamp.
         
-        # extract timestamps to array
-        inputs_ts = np.asarray([i[1] for i in inputs])
+        assume we have many more inputs than labels
         
-        # extract label ts
-        label_ts = label[1]
+        strategy is to search for the closest label for each input, also we can only,
+        use one input per label so if the next closest is further than a removed one 
+        then we would like to collect statistics on that.
         
-        # find nearest input to label
-        inputs_ts = abs( inputs_ts - label_ts )
-        amin = np.argmin(inputs_ts)
-        closest_input = inputs[amin][0]
+        '''   
         
-        # collect metrics
-        ts_diffs += [inputs_ts[amin]]
+        ts_diffs = []    
+        synced_pairs = []
+                 
+        # copy inputs
+        inputs = list(_inputs)
         
-        # add pair
-        synced_pairs += [(closest_input, label[0])] 
+        # loop over labels to find closest input
+        for label in labels:
+            
+            # extract timestamps to array
+            inputs_ts = np.asarray([i[1] for i in inputs])
+            
+            # extract label ts
+            label_ts = label[1]
+            
+            # find nearest input to label
+            inputs_ts = abs( inputs_ts - label_ts )
+            amin = np.argmin(inputs_ts)
+            closest_input = inputs[amin][0]
+            
+            # collect metrics
+            ts_diffs += [inputs_ts[amin]]
+            
+            # add pair
+            synced_pairs += [(closest_input, label[0])] 
+            
+            # delete used input
+            del inputs[amin]
+            
+        return synced_pairs, ts_diffs
         
-        # delete used input
-        del inputs[amin]
-        
-    return synced_pairs, ts_diffs
-        
-if __name__ == '__main__':
-    
-    # create fake input and lable data
-    fake_input = [(i+.01,i+.02) for i in range(10)] + [(666,0),(666,4.0)]      
-    fake_label = [(i,i) for i in range(10)]
-    
-    print(sync_data(fake_input, fake_label))
-        
-    
+#==============================================================================
+# if __name__ == '__main__':
+#     
+#     # create fake input and lable data
+#     fake_input = [(i+.01,i+.02) for i in range(10)] + [(666,0),(666,4.0)]      
+#     fake_label = [(i,i) for i in range(10)]
+#     
+#     print(sync_data(fake_input, fake_label))
+#         
+#     
+#==============================================================================
     
     
     
