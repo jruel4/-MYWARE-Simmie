@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 """
+Created on Thu Jul 27 13:53:26 2017
+
+@author: marzipan
+"""
+
+# -*- coding: utf-8 -*-
+"""
 Created on Thu Jul 20 06:02:07 2017
 
 @author: marzipan
@@ -8,16 +15,17 @@ Created on Thu Jul 20 06:02:07 2017
 import time
 import tensorflow as tf
 import numpy as np
+import pickle
 
 from Simmie.InterfaceAdapters.Output_Adapters.Audio_Command_Adapter import AudioCommandAdapter
 from Simmie.InterfaceAdapters.Input_Adapters.EEG_State_Adapter import EEGStateAdapter
 
-from DataUtilities.LSLUtils.TargetProfile import TargetProfile
+from DataUtilities.TargetProfile import TargetProfile
 
-nchan = 1
+nchan = 8
 nfreqs = 50
-ntimepoints = 5
-sps=250
+ntimepoints = 30
+sps=100
 
 OUTPUT = AudioCommandAdapter(
         name="Simmie",
@@ -29,7 +37,7 @@ INPUT = EEGStateAdapter(
         n_chan=nchan, #should match with pipeline
         eeg_feed_rate=sps, #sps
         samples_per_output=1, # 
-        spectrogram_timespan=1, #assumed to be in seconds
+        spectrogram_timespan=10, #assumed to be in seconds
         n_spectrogram_timepoints=ntimepoints)
 
 
@@ -39,15 +47,12 @@ print("Continuing.")
 
 # Directories
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
-G_logdir = G_logs + 'S40\\'
+G_logdir = G_logs + 'S25\\'
 G_tgtdir = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
 
 # File locations
 checkpoint_file = G_logdir + 'model.ckpt'
 tgt_file = G_tgtdir + 'alpha10hz.tgt'
-
-
-tf.reset_default_graph()
 
 ### CONFIG
 
@@ -67,59 +72,45 @@ shape_act = [None,naudio_commands]
 #==============================================================================
 
 # LEARNING RATES
-pol_imp_lr = 5e-10
-pol_rl_lr = 5e-10
-val_lr = 4e-2
+pol_imp_lr = 5e-4
+pol_rl_lr = 5e-4
+val_lr = 1e-2
 
 # RL CONSTANTS
-val_discount_rate = tf.constant(0.1)
+val_discount_rate = tf.constant(0.9)
 
 # Shared Net Structure
-pv_layers = [10,10,10]
+pv_layers = [100,100, shape_act[1]]
 pv_unroll_len = 1
 
 # Policy Net Structure
-pol_output_units = shape_act[-1]
+pol_output_units = pv_layers[-1]
 
 # Value Net Structure
 val_tgt_weights = tf.constant([-1.,1.],dtype=tf.float32) #weight the output of tgt_out_softmax in calculating value
 val_output_units = 1
 
 
-# Used for input reshaping
-np_shape_eeg_input = [-1, ntimepoints, nchan, nfreqs]
 
-# All
-spectrogram_size = nfreqs * ntimepoints * nchan
 
-shape_eeg_input = [None, ntimepoints, nchan, nfreqs]
-shape_tgt_profile_input = [ntimepoints, nchan, nfreqs]
-
-shape_eeg_feat = [-1,1,spectrogram_size]
-shape_tgt_profile = [1,1,spectrogram_size]
 
 # INPUTS
 with tf.name_scope("in"):
-    in_raw_eeg_features = tf.placeholder(tf.float32, shape=shape_eeg_input, name="IN_EEG")
-    in_raw_tgt_profile = tf.placeholder(tf.float32, shape=shape_tgt_profile_input, name="IN_TGT_PROF")
-    in_raw_tgt_weighting = tf.placeholder(tf.float32, shape=shape_tgt_profile_input, name="IN_TGT_WEIGHTING")
-
-    in_action = tf.placeholder(tf.int32, shape=shape_act, name="IN_ACT")
+    in_eeg_features = tf.placeholder(tf.float32, shape=shape_eeg_feat, name="IN_EEG")
     in_rpv = tf.placeholder(tf.int32, shape=shape_rpv, name="IN_RPV")
-
-    # Reshape the inputs
-    in_eeg_features = tf.reshape(in_raw_eeg_features, shape_eeg_feat)
-    in_tgt_profile = tf.reshape(in_raw_tgt_profile, shape_tgt_profile)
-    in_tgt_weighting = tf.reshape(in_raw_tgt_weighting, shape_tgt_profile)
-
+    in_action = tf.placeholder(tf.int32, shape=shape_act, name="IN_ACT")
+    in_tgt_profile = tf.placeholder(tf.float32, shape=shape_tgt_profile, name="IN_TGT_PROF")
+    in_tgt_weighting = tf.placeholder(tf.float32, shape=shape_tgt_profile, name="IN_TGT_WEIGHTING")
 
 with tf.name_scope("optimizers"):
-    val_optimizer = tf.train.AdamOptimizer(learning_rate=val_lr)
+    val_optimizer = tf.train.RMSPropOptimizer(learning_rate=val_lr, centered=False, decay=0.8)
     pol_imp_optimizer = tf.train.RMSPropOptimizer(learning_rate=pol_imp_lr, centered=False, decay=0.8)
     pol_rl_optimizer = tf.train.RMSPropOptimizer(learning_rate=pol_rl_lr, centered=False, decay=0.8)
 
+
+
 '''
-REWARD _ GOOD
+REWARD
 Input:
     in_eeg_features
 Args:
@@ -142,7 +133,9 @@ with tf.variable_scope("rwrd"):
     sq_weighted = sq * tgt_weighting
     summed = tf.reduce_sum(sq_weighted,axis=(1,2))
     sqrt = tf.sqrt(summed)
-    reward = sqrt
+    reward = -1 * sqrt
+
+
 
 
 # SHARED NET
@@ -156,63 +149,63 @@ with tf.variable_scope("pv"):
     cellOutputs, multicellFinalState = tf.contrib.rnn.static_rnn(stackedLSTM, unstackedInput, dtype=tf.float32, scope='pv_rnn')
 
     pv_lstm_out = cellOutputs[-1]
+
+'''
+VALUE NET
+Input:
+    pv_lstm_out - output of shared LSTM net
+
+Parameters
+    val_output_units - number of output units (usually just 1)
+    val_tgt_weights - 
+'''
+with tf.variable_scope("val"):
+    val_previous_predicted = tf.Variable(0.0, "VAL_PreviousPredicted", dtype=tf.float32)
+    val_next_predicted = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=val_output_units, activation_fn=None,scope='val_dense')
+    val_actual_reward = reward
     
-    '''
-    VALUE NET
-    Input:
-        pv_lstm_out - output of shared LSTM net
-        reward - actual reward
+    val_prediction_error = val_actual_reward - val_previous_predicted
+    with tf.name_scope('loss'):
+        val_loss = tf.reduce_mean(val_prediction_error + (val_discount_rate * val_next_predicted)) # need to manage execution order here, this won't work...
+    val_step = tf.Variable(0, name='VAL_Step', trainable=False)
+    val_train_op = val_optimizer.minimize(val_loss, global_step=val_step)
     
-    Parameters
-        val_output_units - number of output units (usually just 1)
-        val_tgt_weights - 
-    '''
-    with tf.name_scope("val"):
-        # Carryover is the predicted value for state t0 using data from t-1
-        val_carryover_previous_predicted = tf.get_variable("VAL_PreviousPredicted", shape=(1,1), dtype=tf.float32, initializer=tf.constant_initializer(1.0), trainable=False)
+    with tf.control_dependencies([val_loss]):
+        val_assgn_op0 = val_previous_predicted.assign(val_next_predicted[0,0])
     
-        # Next predicted is v(t0) -> v(tN)
-        val_next_predicted = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=val_output_units, activation_fn=None,scope='val_dense')
-        val_previous_predicted = tf.concat([val_carryover_previous_predicted, val_next_predicted[:-1]],axis=0)
-        val_actual_reward = reward
-        val_prediction_error = val_actual_reward - val_previous_predicted
-    
-        with tf.name_scope('loss'):
-            val_loss = tf.abs(tf.reduce_mean(val_prediction_error + (val_discount_rate * val_next_predicted))) # need to manage execution order here, this won't work...
-        val_step = tf.Variable(0, name='VAL_Step', trainable=False)
-        val_train_op = val_optimizer.minimize(val_loss, global_step=val_step)
-        
-        with tf.control_dependencies([val_loss]):
-            val_assgn_op0 = val_carryover_previous_predicted.assign([val_next_predicted[-1]])
-        
-    
-    # POLICY
-    with tf.name_scope("pol_predict"):
-        pol_dense0 = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=pol_output_units, activation_fn=None,scope='pol_dense')
-        pol_out_softmax = tf.nn.softmax(pol_dense0,name="POL_Softmax")
+
+# POLICY
+with tf.variable_scope("pol_predict"):
+        pol_out_softmax = tf.nn.softmax(pv_lstm_out,name="POL_Softmax")
         pol_out_predict = tf.arg_max(pol_out_softmax, 1, "POL_Prediction")
+
+with tf.variable_scope("pol_imp"):
+    # imprinting
+    pol_imp_step = tf.Variable(0, name='POLIMP_Step', trainable=False)
+    pol_imp_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=pol_out_softmax, labels=in_action, name = 'POLIMP_Loss'))
+    pol_imp_train_op = pol_imp_optimizer.minimize(pol_imp_loss, global_step=pol_imp_step)
     
-    with tf.name_scope("pol_imp"):
-        pol_imp_step = tf.Variable(0, name='POLIMP_Step', trainable=False)
-        pol_imp_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=pol_out_softmax, labels=in_action, name = 'POLIMP_Loss'))
-        pol_imp_train_op = pol_imp_optimizer.minimize(pol_imp_loss, global_step=pol_imp_step)
-        
-    with tf.name_scope("pol_rl"):
-        pol_rl_step = tf.Variable(0, name='POLRL_Step', trainable=False)
-        pol_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv") +\
-                        tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pol_rl")
-        pol_rl_loss = tf.reduce_mean(val_prediction_error * val_loss) #not correct
-        pol_rl_train_op = pol_rl_optimizer.minimize(pol_rl_loss, global_step=pol_rl_step, var_list=pol_variables)
+with tf.variable_scope("pol_rl"):
+    pol_rl_step = tf.Variable(0, name='POLRL_Step', trainable=False)
+    pol_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv") +\
+                    tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pol_rl")
+    pol_rl_loss = tf.reduce_mean(val_prediction_error * val_loss) #not correct
+    pol_rl_train_op = pol_rl_optimizer.minimize(pol_rl_loss, global_step=pol_rl_step, var_list=pol_variables)
 
 with tf.name_scope('summaries'):
 
+#==============================================================================
+#     # Target
+#     tgt_summaries =     tf.summary.merge([ tf.summary.scalar("tgt_loss", tgt_loss) ])
+#==============================================================================
+    
     # Value
     val_summaries = tf.summary.merge([
         tf.summary.scalar("val_loss", val_loss),
-        tf.summary.scalar("val_mean_prediction_error", tf.reduce_mean(val_prediction_error)),
-        tf.summary.scalar("val_predicted_t0", val_carryover_previous_predicted[0,0]),
-        tf.summary.scalar("val_reward_t0", val_actual_reward[0]),
-        tf.summary.scalar("val_predicted_t1", val_next_predicted[0,0])
+        tf.summary.scalar("val_prediction_error", val_prediction_error[0]),
+        tf.summary.scalar("val_previous_predicted", val_previous_predicted),
+        tf.summary.scalar("val_current_reward", val_actual_reward[0]),
+        tf.summary.scalar("val_next_predicted", val_next_predicted[0,0]),
     ])
     
     # Policy
@@ -220,13 +213,10 @@ with tf.name_scope('summaries'):
     pol_rl_summaries =  tf.summary.merge([ tf.summary.scalar("polrl_loss", pol_rl_loss) ])
     pol_imp_summaries = tf.summary.merge([ tf.summary.scalar("polimp_loss", pol_imp_loss) ])
     
-    input_summaries = tf.summary.merge([
-            tf.summary.image('spect', tf.reshape(in_raw_eeg_features, shape_eeg_input[1:] + [1]), max_outputs=nchan)
-            ])
+    input_summaries = tf.summary.merge([ tf.summary.image('spect', tf.transpose(tf.reshape(in_tgt_profile, [-1,nchan*ntimepoints,nfreqs,1]),perm=[0,2,1,3]) ) ])
     
     tgt_prof_summaries = tf.summary.merge([ 
-            tf.summary.image('tgt_prof', tf.reshape(in_raw_tgt_profile , [ntimepoints,nchan,nfreqs,1]), max_outputs=nchan),
-            tf.summary.image('tgt_weighting', tf.reshape(in_raw_tgt_weighting , [ntimepoints,nchan,nfreqs,1]), max_outputs=nchan)
+            tf.summary.image('tgt_prof', tf.transpose(tf.reshape(in_tgt_profile, [nchan,ntimepoints,nfreqs,1]),perm=[0,2,1,3]), max_outputs=nchan)
             ])
     
 #==============================================================================
@@ -279,7 +269,7 @@ def train(sess,writer,feed,fetch,sessrun_name=''):
     return out
 
 def val_train(sess, writer, eeg_data, sessrun_name=''):
-    feed = { in_raw_eeg_features : eeg_data}
+    feed = { in_eeg_features : eeg_data}
     fetch = {
             'train_op'  : val_train_op,
             'loss'      : val_loss,
@@ -291,7 +281,7 @@ def val_train(sess, writer, eeg_data, sessrun_name=''):
 
     
 def pol_predict(sess, writer, eeg_data, sessrun_name=''):
-    feed = {in_raw_eeg_features : eeg_data}
+    feed = {in_eeg_features : eeg_data}
     fetch = {
             'prediction'      : pol_out_predict,
             'softmax'         : pol_out_softmax }
@@ -300,7 +290,7 @@ def pol_predict(sess, writer, eeg_data, sessrun_name=''):
 
 def pol_imp_train(sess, writer, eeg_data, proctor_action, sessrun_name=''):
     feed = {
-            in_raw_eeg_features : eeg_data,
+            in_eeg_features : eeg_data,
             in_action       : proctor_action }
     fetch = {
             'train_op'  : pol_imp_train_op,
@@ -311,7 +301,7 @@ def pol_imp_train(sess, writer, eeg_data, proctor_action, sessrun_name=''):
     return train(sess,writer,feed,fetch,sessrun_name)
 
 def pol_rl_train(sess, writer, eeg_data, sessrun_name=''):
-    feed = { in_raw_eeg_features : eeg_data}
+    feed = { in_eeg_features : eeg_data}
     fetch = {
             'train_op'  : pol_rl_train_op,
             'loss'      : pol_rl_loss,
@@ -323,8 +313,8 @@ def pol_rl_train(sess, writer, eeg_data, sessrun_name=''):
 
 def set_target_profile(sess,writer,tgt_profile, tgt_weighting, step):
     feed = {
-            in_raw_tgt_profile : tgt_profile,
-            in_raw_tgt_weighting : tgt_weighting
+            in_tgt_profile : tgt_profile,
+            in_tgt_weighting : tgt_weighting
             }
     fetch = {
             'target_profile_assign_op' : tgt_assgn,
@@ -353,7 +343,7 @@ sess.run(tf.global_variables_initializer())
 #==============================================================================
 
 # Empty data structures
-empty_data = np.empty([0,ntimepoints,nchan,nfreqs])
+empty_data = np.empty([0,1,nfreqs * ntimepoints * nchan])
 empty_rpv = np.empty([0,shape_rpv[1]])
 empty_act = np.empty([0,naudio_commands])
 
@@ -369,7 +359,7 @@ rl_training_data = empty_data
 # tgt_minimum_batch_size = 5
 #==============================================================================
 imp_minimum_batch_size = 100
-rl_minimum_batch_size = 5
+rl_minimum_batch_size = 100
 
 # Intervals - all in seconds!
 interval_send_command = 0.1 # time to send all commands
@@ -429,10 +419,12 @@ def check_timekeep(timekeep, interval):
 # LOAD TARGET STATE
 
 tgt = TargetProfile()
-f,w = tgt.create_tgt_profile(range(18,23),[50,100,200,100,50],nchan, nfreqs, ntimepoints)
+f,w = tgt.create_tgt_profile(range(18,23),[200,200,200,200,200],nchan,nfreqs, ntimepoints)
+w=w.reshape((1,1,-1))
 w2 = w / np.max(w)
 set_target_profile(sess,summary_writer,w,w2,0)
 
+once = False
 try:
     while(True):
         loop_idx += 1
@@ -441,7 +433,7 @@ try:
         raw_data, tgt_data, tgt_lbls, imp_data, imp_lbls  = INPUT.retrieve_latest_data()
         # Check if actually got any data
         if len(raw_data) > 0:
-            raw_data = raw_data.reshape(np_shape_eeg_input)
+            raw_data = np.reshape(raw_data,(-1,1, ntimepoints * nchan * nfreqs))
             rl_training_data = np.concatenate((rl_training_data,raw_data))
         else:
             # imp_data / rpv_data should NEVER contain any data if raw_data is empty
@@ -457,7 +449,7 @@ try:
     
         # Load training data if any is present
         if len(imp_data) > 0:
-            imp_data = imp_data.reshape(np_shape_eeg_input)
+            imp_data = np.reshape(imp_data,(-1,1, ntimepoints * nchan * nfreqs))
             imp_lbls = one_hot(imp_lbls, naudio_commands, len(imp_lbls))#[:,None,:]
             imp_training_data = np.concatenate((imp_training_data,imp_data))
             imp_training_lbls = np.concatenate((imp_training_lbls,imp_lbls))
