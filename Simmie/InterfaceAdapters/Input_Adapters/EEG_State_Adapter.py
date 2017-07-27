@@ -21,8 +21,8 @@ from pylsl import StreamInfo, StreamOutlet, StreamInlet, resolve_stream
 import numpy as np
 from collections import deque
 
-from Simmie.Simmie.InterfaceAdapters.Input_Adapters.Imprint_Adapter import ImprintAdapter
-from Simmie.Simmie.InterfaceAdapters.Input_Adapters.Reward_Punish_Adapter import RewardPunishAdapter
+from Simmie.InterfaceAdapters.Input_Adapters.Imprint_Adapter import ImprintAdapter
+from Simmie.InterfaceAdapters.Input_Adapters.Reward_Punish_Adapter import RewardPunishAdapter
 
 class EEGStateAdapter:
     
@@ -38,8 +38,8 @@ class EEGStateAdapter:
         self.eeg_fifo = deque([], maxlen=self.eeg_fifo_len)
         
         # Init other adapters
-        self.imprintAdapter = ImprintAdapter(dbg=True)
-        self.rpvAdapter = RewardPunishAdapter(dbg=True)
+        self.imprintAdapter = ImprintAdapter(dbg=False)
+        self.rpvAdapter = RewardPunishAdapter(dbg=False)
         
         self.rpv_data_dict = dict()
         self.imprint_data_dict = dict()
@@ -117,7 +117,7 @@ class EEGStateAdapter:
         self.rpvAdapter.launch_rpv_adapter()
 
         print("Resolving EEG marker stream...")
-        streams = resolve_stream('type', 'SPECT')
+        streams = resolve_stream('type', 'PERIODO')
         snum = 0
         if manual_stream_select:
             for i,s in enumerate(streams):
