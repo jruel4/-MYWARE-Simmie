@@ -12,10 +12,10 @@ import numpy as np
 from Simmie.InterfaceAdapters.Output_Adapters.Audio_Command_Adapter import AudioCommandAdapter
 from Simmie.InterfaceAdapters.Input_Adapters.EEG_State_Adapter import EEGStateAdapter
 
-from DataUtilities.LSLUtils.TargetProfile import TargetProfile
+from LSLUtils.TargetProfile import TargetProfile
 
 nchan = 1
-nfreqs = 50
+nfreqs = 250
 ntimepoints = 5
 sps=250
 
@@ -39,7 +39,7 @@ print("Continuing.")
 
 # Directories
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
-G_logdir = G_logs + 'S40\\'
+G_logdir = G_logs + 'S47\\'
 G_tgtdir = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
 
 # File locations
@@ -429,7 +429,7 @@ def check_timekeep(timekeep, interval):
 # LOAD TARGET STATE
 
 tgt = TargetProfile()
-f,w = tgt.create_tgt_profile(range(18,23),[50,100,200,100,50],nchan, nfreqs, ntimepoints)
+f,w = tgt.create_tgt_profile(range(18,23),[5e2,10e2,20e2,10e2,5e2],nchan, nfreqs, ntimepoints)
 w2 = w / np.max(w)
 set_target_profile(sess,summary_writer,w,w2,0)
 
