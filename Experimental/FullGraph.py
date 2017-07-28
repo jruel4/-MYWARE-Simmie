@@ -39,7 +39,7 @@ print("Continuing.")
 
 # Directories
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
-G_logdir = G_logs + 'S47\\'
+G_logdir = G_logs + 'S48\\'
 G_tgtdir = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
 
 # File locations
@@ -67,9 +67,9 @@ shape_act = [None,naudio_commands]
 #==============================================================================
 
 # LEARNING RATES
-pol_imp_lr = 5e-10
-pol_rl_lr = 5e-10
-val_lr = 4e-2
+pol_imp_lr = 5e-2
+pol_rl_lr = 5e-2
+val_lr = 2e-2
 
 # RL CONSTANTS
 val_discount_rate = tf.constant(0.1)
@@ -116,7 +116,7 @@ with tf.name_scope("in"):
 with tf.name_scope("optimizers"):
     val_optimizer = tf.train.AdamOptimizer(learning_rate=val_lr)
     pol_imp_optimizer = tf.train.RMSPropOptimizer(learning_rate=pol_imp_lr, centered=False, decay=0.8)
-    pol_rl_optimizer = tf.train.RMSPropOptimizer(learning_rate=pol_rl_lr, centered=False, decay=0.8)
+#    pol_rl_optimizer = tf.train.RMSPropOptimizer(learning_rate=pol_rl_lr, centered=False, decay=0.8)
 
 '''
 REWARD _ GOOD
@@ -175,10 +175,14 @@ with tf.variable_scope("pv"):
         val_next_predicted = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=val_output_units, activation_fn=None,scope='val_dense')
         val_previous_predicted = tf.concat([val_carryover_previous_predicted, val_next_predicted[:-1]],axis=0)
         val_actual_reward = reward
-        val_prediction_error = val_actual_reward - val_previous_predicted
-    
+        
+        # Value prediction error is (R(T) + future_discount*V(T+1)) - V(T)
+        #   V(T) represents the expected value of this state
+        #   (R(T) + future_discount*V(T+1)) represents a more accurate value (since we know R(T))
+        val_prediction_error = (val_actual_reward + val_discount_rate * val_next_predicted) - val_previous_predicted
+
         with tf.name_scope('loss'):
-            val_loss = tf.abs(tf.reduce_mean(val_prediction_error + (val_discount_rate * val_next_predicted))) # need to manage execution order here, this won't work...
+            val_loss = tf.abs(tf.reduce_mean(val_prediction_error)) # need to manage execution order here, this won't work...
         val_step = tf.Variable(0, name='VAL_Step', trainable=False)
         val_train_op = val_optimizer.minimize(val_loss, global_step=val_step)
         
@@ -199,10 +203,34 @@ with tf.variable_scope("pv"):
         
     with tf.name_scope("pol_rl"):
         pol_rl_step = tf.Variable(0, name='POLRL_Step', trainable=False)
-        pol_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv") +\
-                        tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pol_rl")
-        pol_rl_loss = tf.reduce_mean(val_prediction_error * val_loss) #not correct
-        pol_rl_train_op = pol_rl_optimizer.minimize(pol_rl_loss, global_step=pol_rl_step, var_list=pol_variables)
+        pol_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pv_rnn") +\
+                        tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense")
+
+
+        # Reduce softmax output to only the chosen actions (A(t) with highest probability)
+        pol_chosen_acts = tf.reduce_max(pol_out_softmax, axis=1)
+        
+        # Scale actions by the value function error (and step size!)
+        #   positive error means that the state's value was worth more than we expected
+        #   negative error means that the state was worth less than we expected)
+        pol_chosen_acts_scaled = (pol_chosen_acts * tf.stop_gradient(val_prediction_error)) / tf.stop_gradient(pol_chosen_acts)
+
+        # Normalize w/ respect to the probability of the chosen action
+#        pol_grads_norm = pol_grads / pol_chosen_acts
+
+        # Take the gradients of the chosen action with respect to the parameterization of the function
+        pol_grads = tf.gradients(pol_chosen_acts_scaled, pol_variables)
+
+        # Generate the training op
+        pol_rl_train_op = list()
+        for idx in range(len(pol_variables)):
+            pol_rl_train_op.append(tf.assign(pol_variables[idx], pol_variables[idx] + pol_grads[idx] * pol_rl_lr))
+
+        # Is this how we're supposed to update the step??
+        pol_rl_train_op.append(tf.assign(pol_rl_step, pol_rl_step+1))
+
+#        pol_rl_loss = tf.reduce_mean(val_prediction_error * val_loss) #not correct
+#        pol_rl_train_op = pol_rl_optimizer.minimize(pol_rl_loss, global_step=pol_rl_step, var_list=pol_variables)
 
 with tf.name_scope('summaries'):
 
@@ -217,7 +245,7 @@ with tf.name_scope('summaries'):
     
     # Policy
     pol_summaries =     tf.summary.merge([ tf.summary.scalar("pol_prediction", pol_out_predict[0]) ])
-    pol_rl_summaries =  tf.summary.merge([ tf.summary.scalar("polrl_loss", pol_rl_loss) ])
+    pol_rl_summaries =  tf.summary.merge([ tf.summary.scalar("polrl_step", pol_rl_step) ])
     pol_imp_summaries = tf.summary.merge([ tf.summary.scalar("polimp_loss", pol_imp_loss) ])
     
     input_summaries = tf.summary.merge([
@@ -314,7 +342,7 @@ def pol_rl_train(sess, writer, eeg_data, sessrun_name=''):
     feed = { in_raw_eeg_features : eeg_data}
     fetch = {
             'train_op'  : pol_rl_train_op,
-            'loss'      : pol_rl_loss,
+            'loss'      : val_loss,
             'summaries' : pol_rl_summaries,
             'step'      : pol_rl_step
             }

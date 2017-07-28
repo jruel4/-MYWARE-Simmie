@@ -175,7 +175,7 @@ class EnvironmentSimulator:
         # Launch the fake data simulator to send outputs to
         #TODO use LSL Utils
         self.output_data_simulator = Fake_Periodogram()
-        self.output_data_simulator.create_fake_periodo(name="SIM", sps=250.0, nchan=1, nfreqs=250,noise_max_amp = 0.2)
+        self.output_data_simulator.create_fake_periodo(name="SIM1", sps=250.0, nchan=1, nfreqs=250,noise_max_amp = 0.0)
         self.output_data_simulator.set_peaks_amps([1.0], [.2])
         
     def set_fake_eeg_properties(self, freq):
@@ -183,7 +183,7 @@ class EnvironmentSimulator:
         Set dominant eeg frequency to use in eeg data synthesis
         '''
         #TODO set fake freqs
-        self.output_data_simulator.set_peaks_amps([freq], [0.2])
+        self.output_data_simulator.set_peaks_amps([freq], [3.0])
         
         
         
