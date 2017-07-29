@@ -142,9 +142,14 @@ class EnvironmentSimulator:
         while self.command_thread_event.isSet():
     
             # get command
-            command_set, timestamps = self.inlet.pull_sample()
+            command_set, timestamps = self.inlet.pull_sample(timeout=12.5)
+            if command_set == None and timestamps == None:
+                if self.rx_count > 0:
+                    print("Timed out pulling sample.")
+                    self.command_thread_event.clear()
+                continue
             
-            if self.rx_count % 5 == 0:
+            if self.rx_count % 50 == 0:
                 print("rx cmd: ",command_set)
             self.rx_count += 1
             
@@ -156,10 +161,12 @@ class EnvironmentSimulator:
             else:
                 print("Invalid command set size: ",command_set)
                 
-        print("Ending command rx loop")
+        self.output_data_simulator.kill()
+        print("Ending command rx loop.")
 
     def launch_simulator(self, manual_stream_select=True):
-        
+        print("Launching environment simulator, looking for \"AudioCommands\" stream...")
+
         # Select the command thread to receive inputs from
         streams = resolve_stream('type', 'AudioCommands')
         snum = 0
@@ -176,14 +183,16 @@ class EnvironmentSimulator:
         #TODO use LSL Utils
         self.output_data_simulator = Fake_Periodogram()
         self.output_data_simulator.create_fake_periodo(name="SIM1", sps=250.0, nchan=1, nfreqs=250,noise_max_amp = 0.0)
-        self.output_data_simulator.set_peaks_amps([1.0], [.2])
+        self.output_data_simulator.set_peaks_amps([1.0], [1.0])
         
     def set_fake_eeg_properties(self, freq):
         '''
         Set dominant eeg frequency to use in eeg data synthesis
         '''
         #TODO set fake freqs
-        self.output_data_simulator.set_peaks_amps([freq], [3.0])
+        self.output_data_simulator.set_peaks_amps([freq], [1.0])
+        if self.rx_count % 50 == 0:
+            print("Setting peak frequency to: ", freq)
         
         
         

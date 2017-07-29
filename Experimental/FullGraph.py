@@ -16,7 +16,7 @@ from LSLUtils.TargetProfile import TargetProfile
 
 nchan = 1
 nfreqs = 250
-ntimepoints = 5
+ntimepoints = 1
 sps=250
 
 OUTPUT = AudioCommandAdapter(
@@ -29,17 +29,21 @@ INPUT = EEGStateAdapter(
         n_chan=nchan, #should match with pipeline
         eeg_feed_rate=sps, #sps
         samples_per_output=1, # 
-        spectrogram_timespan=1, #assumed to be in seconds
+        spectrogram_timespan=1., #assumed to be in seconds
         n_spectrogram_timepoints=ntimepoints)
 
+_ = input("ACA started, now start up audio control GUI...\nPress enter when ready.")
+print("Continuing.\n")
 
-_ = input("\nACA started, now start up audio control GUI...\nPress enter when ready.")
-print("Continuing.")
 
+# LEARNING RATES
+pol_imp_lr = 1e-50
+pol_rl_lr = 1e-5
+val_lr = 1e-2
 
 # Directories
-G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
-G_logdir = G_logs + 'S48\\'
+G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\LR\\'
+G_logdir = G_logs + 'S4\\'
 G_tgtdir = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
 
 # File locations
@@ -65,11 +69,6 @@ shape_act = [None,naudio_commands]
 # tgt_layers = [50,50,tgt_output_units]
 # tgt_lr = 1e-3
 #==============================================================================
-
-# LEARNING RATES
-pol_imp_lr = 5e-2
-pol_rl_lr = 5e-2
-val_lr = 2e-2
 
 # RL CONSTANTS
 val_discount_rate = tf.constant(0.1)
@@ -147,12 +146,23 @@ with tf.variable_scope("rwrd"):
 
 # SHARED NET
 with tf.variable_scope("pv"):
-    LSTMCellOps = [tf.contrib.rnn.BasicLSTMCell(pv_nunits, state_is_tuple=True,forget_bias=2.0) for pv_nunits in pv_layers]
+    
+    # For each "layer" create an LSTM cell
+    LSTMCellOps = list()
+    for pv_units in pv_layers:
+        LSTMCellOps.append(tf.contrib.rnn.BasicLSTMCell(pv_units, state_is_tuple=True,forget_bias=2.0))
+
+    # Connect all of the LSTM cells together
     stackedLSTM = tf.contrib.rnn.MultiRNNCell(LSTMCellOps, state_is_tuple=True)
+
+
+    input_state = tf.Variable(stackedLSTM.zero_state(1,tf.float32))
+    
+
+    # Unroll the input (assuming we're getting a static sequence length in, TODO make dynamic...)
     unstackedInput = tf.unstack(in_eeg_features, axis=1, num=pv_unroll_len, name="PV_UnrolledInput")
 
-    # cellOutputs corresponds to the output of each multicell in the unrolled LSTM
-    # finalState maps to last cell in unrolled LSTM; has one entry for each cell in the multicell ([C0,...,Cn] for an n-celled multicell), each entry is tuple corresponding to (internalHiddenState,outputHiddenState)
+    # Generate RNN, multicellFinalState is the final state
     cellOutputs, multicellFinalState = tf.contrib.rnn.static_rnn(stackedLSTM, unstackedInput, dtype=tf.float32, scope='pv_rnn')
 
     pv_lstm_out = cellOutputs[-1]
@@ -193,11 +203,22 @@ with tf.variable_scope("pv"):
     # POLICY
     with tf.name_scope("pol_predict"):
         pol_dense0 = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=pol_output_units, activation_fn=None,scope='pol_dense')
-        pol_out_softmax = tf.nn.softmax(pol_dense0,name="POL_Softmax")
+        pol_out_softmax = tf.nn.softmax(pol_dense0, name="POL_Softmax")
         pol_out_predict = tf.arg_max(pol_out_softmax, 1, "POL_Prediction")
-    
+
+        # Distribution
+        #TODO Will this calculate gradients correctly?
+        dist = tf.contrib.distributions.Multinomial(total_count=1., probs=pol_out_softmax)
+        dist_sample = dist.sample()
+        pol_out_predict_dist = tf.arg_max(dist_sample, 1, "POL_PredictionDist")
+        
+        # This is used for summaries
+        pol_step_var = tf.Variable(0, name='POL_Step', trainable=False)
+        pol_step = tf.assign(pol_step_var, pol_step_var + 1)
+
     with tf.name_scope("pol_imp"):
         pol_imp_step = tf.Variable(0, name='POLIMP_Step', trainable=False)
+        # TODO Does this need to be fixed since we are exploring, not just being greedy?
         pol_imp_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=pol_out_softmax, labels=in_action, name = 'POLIMP_Loss'))
         pol_imp_train_op = pol_imp_optimizer.minimize(pol_imp_loss, global_step=pol_imp_step)
         
@@ -208,7 +229,7 @@ with tf.variable_scope("pv"):
 
 
         # Reduce softmax output to only the chosen actions (A(t) with highest probability)
-        pol_chosen_acts = tf.reduce_max(pol_out_softmax, axis=1)
+        pol_chosen_acts = tf.cast(tf.reduce_max(pol_out_softmax * dist_sample, axis=1), tf.float32)
         
         # Scale actions by the value function error (and step size!)
         #   positive error means that the state's value was worth more than we expected
@@ -229,8 +250,6 @@ with tf.variable_scope("pv"):
         # Is this how we're supposed to update the step??
         pol_rl_train_op.append(tf.assign(pol_rl_step, pol_rl_step+1))
 
-#        pol_rl_loss = tf.reduce_mean(val_prediction_error * val_loss) #not correct
-#        pol_rl_train_op = pol_rl_optimizer.minimize(pol_rl_loss, global_step=pol_rl_step, var_list=pol_variables)
 
 with tf.name_scope('summaries'):
 
@@ -242,9 +261,21 @@ with tf.name_scope('summaries'):
         tf.summary.scalar("val_reward_t0", val_actual_reward[0]),
         tf.summary.scalar("val_predicted_t1", val_next_predicted[0,0])
     ])
-    
+
+    weights_pol_dense = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense/weights")[0]
+    biases_pol_dense = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense/biases")[0]
+
     # Policy
-    pol_summaries =     tf.summary.merge([ tf.summary.scalar("pol_prediction", pol_out_predict[0]) ])
+    pol_summaries =     tf.summary.merge([
+            tf.summary.scalar("pol_prediction", pol_out_predict[0]),
+            tf.summary.scalar("pol_prediction_dist", pol_out_predict_dist[0]),
+            tf.summary.histogram("pol_softmax", pol_out_softmax),
+            tf.summary.histogram("pol_predictions", pol_out_predict),
+            tf.summary.histogram("pol_predictions_dist", pol_out_predict_dist),
+            tf.summary.histogram(weights_pol_dense.name, tf.reshape(weights_pol_dense.value(), [-1])),
+            tf.summary.histogram(biases_pol_dense.name, biases_pol_dense.value()),
+            tf.summary.image(weights_pol_dense.name, tf.reshape(weights_pol_dense.value(), [1,pv_layers[-1], naudio_commands, 1]), max_outputs=5, collections=None)
+            ])
     pol_rl_summaries =  tf.summary.merge([ tf.summary.scalar("polrl_step", pol_rl_step) ])
     pol_imp_summaries = tf.summary.merge([ tf.summary.scalar("polimp_loss", pol_imp_loss) ])
     
@@ -321,8 +352,13 @@ def val_train(sess, writer, eeg_data, sessrun_name=''):
 def pol_predict(sess, writer, eeg_data, sessrun_name=''):
     feed = {in_raw_eeg_features : eeg_data}
     fetch = {
-            'prediction'      : pol_out_predict,
-            'softmax'         : pol_out_softmax }
+            'prediction'      : pol_out_predict_dist,
+            'prediction_old'      : pol_out_predict,
+            'softmax'         : pol_out_softmax,
+            'summaries'       : pol_summaries,
+            'step'            : pol_step
+            }
+
     return predict(sess,writer,feed,fetch,sessrun_name)
     
 
@@ -347,6 +383,27 @@ def pol_rl_train(sess, writer, eeg_data, sessrun_name=''):
             'step'      : pol_rl_step
             }
     return train(sess,writer,feed,fetch,sessrun_name)
+
+def rl_train(sess, writer, eeg_data, sessrun_name=''):
+    feed = { in_raw_eeg_features : eeg_data}
+    pol_fetch = {
+            'pol_train_op'  : pol_rl_train_op,
+            'pol_loss'      : val_loss,
+            'pol_summaries' : pol_rl_summaries,
+            'pol_step'      : pol_rl_step
+            }
+    
+    val_fetch = {
+            'val_train_op'  : val_train_op,
+            'val_loss'      : val_loss,
+            'val_summaries' : val_summaries,
+            'val_step'      : val_step,
+            'val_assgn_op'  : val_assgn_op0.op # assigns the new predicted value to the old predicted value
+            }
+    merged_fetch = {pol_fetch, val_fetch} # cool python 3.5 trick to merge dictionaries
+    return train(sess,writer,feed,merged_fetch,sessrun_name)
+
+
 
 
 def set_target_profile(sess,writer,tgt_profile, tgt_weighting, step):
@@ -397,10 +454,10 @@ rl_training_data = empty_data
 # tgt_minimum_batch_size = 5
 #==============================================================================
 imp_minimum_batch_size = 100
-rl_minimum_batch_size = 5
+rl_minimum_batch_size = 1
 
 # Intervals - all in seconds!
-interval_send_command = 0.1 # time to send all commands
+interval_send_command = 0.0 # time to send all commands
 interval_console_output = 1.0
 interval_summary_writer = 0.1
 interval_graph_saver = 60.0
@@ -457,7 +514,13 @@ def check_timekeep(timekeep, interval):
 # LOAD TARGET STATE
 
 tgt = TargetProfile()
-f,w = tgt.create_tgt_profile(range(18,23),[5e2,10e2,20e2,10e2,5e2],nchan, nfreqs, ntimepoints)
+
+#peaks = range(16,25)
+peaks = [20]
+#amps = [1.25e0,2.5e0,5e0,10e0,20e0,10e0,5e0,2.5e0,1.25e0]
+amps = [1.0]
+
+f,w = tgt.create_tgt_profile(peaks,amps,nchan, nfreqs, ntimepoints)
 w2 = w / np.max(w)
 set_target_profile(sess,summary_writer,w,w2,0)
 
@@ -478,9 +541,16 @@ try:
     
         # Send output commands if they have not been sent in this interval
         if do_sendcommand:
-            for i in range(4):
-                act_out = pol_predict(sess, summary_writer, raw_data[-1,None])['prediction'][0] # TODO, Ok to send states like this?
+            for i in range(1):
+                policy_predict_info = pol_predict(sess, summary_writer, raw_data[-1,None]) # select the most recent data but make sure we still have a batch size of 1 (raw_data[-1].shape = [ntimepoints,nchan,nfreq] whereas raw_data[-1,None].shape = [1,ntimepoints,nchan,nfreq]
+                act_out = policy_predict_info['prediction'][0]
                 OUTPUT.submit_command_relaxed(act_out)
+
+                # summaries
+                summary_writer.add_summary(policy_predict_info['summaries'], global_step=policy_predict_info['step'])
+                in_img_summary = sess.run(input_summaries, {in_raw_eeg_features: raw_data[-1,None]})
+                summary_writer.add_summary(in_img_summary, global_step=policy_predict_info['step'])
+
             cmds_sent += 1
     
         # Load training data if any is present
