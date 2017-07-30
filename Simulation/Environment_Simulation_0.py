@@ -185,7 +185,9 @@ class EnvironmentSimulator:
         #TODO set fake freqs
         self.output_data_simulator.set_peaks_amps([freq], [0.2])
         
-        
+if __name__ == "__main__":
+    #TODO write test 
+    pass        
         
       
         
