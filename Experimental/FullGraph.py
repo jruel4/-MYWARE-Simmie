@@ -38,12 +38,12 @@ print("Continuing.\n")
 
 # LEARNING RATES
 pol_imp_lr = 1e-50
-pol_rl_lr = 1e-5
-val_lr = 1e-2
+pol_rl_lr = 4e-5
+val_lr = 1e-3
 
 # Directories
 G_logs = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\LR\\'
-G_logdir = G_logs + 'S4\\'
+G_logdir = G_logs + 'S17\\'
 G_tgtdir = 'C:\\Users\\marzipan\\workspace\\Simmie\\Experimental\\Logs\\'
 
 # File locations
@@ -87,12 +87,14 @@ val_output_units = 1
 
 # Used for input reshaping
 np_shape_eeg_input = [-1, ntimepoints, nchan, nfreqs]
+np_shape_rnn_input = (len(pv_layers), 2, 1, 10)
 
 # All
 spectrogram_size = nfreqs * ntimepoints * nchan
 
 shape_eeg_input = [None, ntimepoints, nchan, nfreqs]
 shape_tgt_profile_input = [ntimepoints, nchan, nfreqs]
+shape_rnn_input = (len(pv_layers), 2, None, 10)
 
 shape_eeg_feat = [-1,1,spectrogram_size]
 shape_tgt_profile = [1,1,spectrogram_size]
@@ -105,12 +107,14 @@ with tf.name_scope("in"):
 
     in_action = tf.placeholder(tf.int32, shape=shape_act, name="IN_ACT")
     in_rpv = tf.placeholder(tf.int32, shape=shape_rpv, name="IN_RPV")
-
+    
     # Reshape the inputs
     in_eeg_features = tf.reshape(in_raw_eeg_features, shape_eeg_feat)
     in_tgt_profile = tf.reshape(in_raw_tgt_profile, shape_tgt_profile)
     in_tgt_weighting = tf.reshape(in_raw_tgt_weighting, shape_tgt_profile)
 
+    # This represents the RNNs current state
+    in_rnn_state = tf.placeholder(tf.float32, shape_rnn_input)
 
 with tf.name_scope("optimizers"):
     val_optimizer = tf.train.AdamOptimizer(learning_rate=val_lr)
@@ -155,15 +159,22 @@ with tf.variable_scope("pv"):
     # Connect all of the LSTM cells together
     stackedLSTM = tf.contrib.rnn.MultiRNNCell(LSTMCellOps, state_is_tuple=True)
 
-
-    input_state = tf.Variable(stackedLSTM.zero_state(1,tf.float32))
-    
-
     # Unroll the input (assuming we're getting a static sequence length in, TODO make dynamic...)
     unstackedInput = tf.unstack(in_eeg_features, axis=1, num=pv_unroll_len, name="PV_UnrolledInput")
 
+    #JCR0
+    # Load in the LSTM state
+    l = tf.unstack(in_rnn_state, axis=0)
+    rnn_tuple_state = tuple(
+        [tf.nn.rnn_cell.LSTMStateTuple(l[idx][0], l[idx][1])
+         for idx in range(len(pv_layers))]
+    )
+    
+#    batch_size = tf.concat((tf.shape(in_eeg_features)[0,None], np.ones([3])), 0)
+#    rnn_states_batch = tf.tile(rnn_tuple_state, batch_size)
+
     # Generate RNN, multicellFinalState is the final state
-    cellOutputs, multicellFinalState = tf.contrib.rnn.static_rnn(stackedLSTM, unstackedInput, dtype=tf.float32, scope='pv_rnn')
+    cellOutputs, multicellFinalState = tf.contrib.rnn.static_rnn(stackedLSTM, unstackedInput, dtype=tf.float32, initial_state=rnn_tuple_state,scope='pv_rnn')
 
     pv_lstm_out = cellOutputs[-1]
     
@@ -189,10 +200,10 @@ with tf.variable_scope("pv"):
         # Value prediction error is (R(T) + future_discount*V(T+1)) - V(T)
         #   V(T) represents the expected value of this state
         #   (R(T) + future_discount*V(T+1)) represents a more accurate value (since we know R(T))
-        val_prediction_error = (val_actual_reward + val_discount_rate * val_next_predicted) - val_previous_predicted
+        td_error = (val_actual_reward + val_discount_rate * val_next_predicted) - val_previous_predicted
 
         with tf.name_scope('loss'):
-            val_loss = tf.abs(tf.reduce_mean(val_prediction_error)) # need to manage execution order here, this won't work...
+            val_loss = tf.abs(tf.reduce_mean(td_error)) # need to manage execution order here, this won't work...
         val_step = tf.Variable(0, name='VAL_Step', trainable=False)
         val_train_op = val_optimizer.minimize(val_loss, global_step=val_step)
         
@@ -207,7 +218,6 @@ with tf.variable_scope("pv"):
         pol_out_predict = tf.arg_max(pol_out_softmax, 1, "POL_Prediction")
 
         # Distribution
-        #TODO Will this calculate gradients correctly?
         dist = tf.contrib.distributions.Multinomial(total_count=1., probs=pol_out_softmax)
         dist_sample = dist.sample()
         pol_out_predict_dist = tf.arg_max(dist_sample, 1, "POL_PredictionDist")
@@ -224,28 +234,39 @@ with tf.variable_scope("pv"):
         
     with tf.name_scope("pol_rl"):
         pol_rl_step = tf.Variable(0, name='POLRL_Step', trainable=False)
-        pol_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pv_rnn") +\
-                        tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense")
 
 
-        # Reduce softmax output to only the chosen actions (A(t) with highest probability)
+    with tf.name_scope("calc_pol_grads"):
+        # Get the variables which we can train on
+        pol_trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pv_rnn") + tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense")
+
+        # Reduce softmax output to only actions we have chosen
+        # NOTE: dist_sample is basically a mask, 0 if action was not chosen and 1 if action was chosen
         pol_chosen_acts = tf.cast(tf.reduce_max(pol_out_softmax * dist_sample, axis=1), tf.float32)
+        pol_gradients_tmp = tf.gradients(pol_chosen_acts, pol_trainable_variables)
+        #TODO divide the gradients 
+        
+        # Create gradient variables
+        pol_gradient_vars = list()
+        for v in pol_trainable_variables:
+            pol_gradient_vars.append( tf.get_variable("policy_gradient/" + v.name, shape=v.shape, dtype=v.dtype, trainable=False, initializer=tf.constant_initializer(0.0)) )
+        
+    with tf.name_scope("policy_backprop"):
+        
+        # Generate the training op
+        pol_rl_train_op = list()
+        for idx in range(len(pol_trainable_variables)):
+            gradient_scaled = pol_gradient_vars[idx] * pol_rl_lr * td_error
+            pol_rl_train_op.append(tf.assign(pol_trainable_variables[idx], pol_trainable_variables[idx] + pol_gradients_raw[idx] * pol_rl_lr))
         
         # Scale actions by the value function error (and step size!)
         #   positive error means that the state's value was worth more than we expected
         #   negative error means that the state was worth less than we expected)
-        pol_chosen_acts_scaled = (pol_chosen_acts * tf.stop_gradient(val_prediction_error)) / tf.stop_gradient(pol_chosen_acts)
-
-        # Normalize w/ respect to the probability of the chosen action
-#        pol_grads_norm = pol_grads / pol_chosen_acts
 
         # Take the gradients of the chosen action with respect to the parameterization of the function
         pol_grads = tf.gradients(pol_chosen_acts_scaled, pol_variables)
 
-        # Generate the training op
-        pol_rl_train_op = list()
-        for idx in range(len(pol_variables)):
-            pol_rl_train_op.append(tf.assign(pol_variables[idx], pol_variables[idx] + pol_grads[idx] * pol_rl_lr))
+
 
         # Is this how we're supposed to update the step??
         pol_rl_train_op.append(tf.assign(pol_rl_step, pol_rl_step+1))
@@ -253,17 +274,20 @@ with tf.variable_scope("pv"):
 
 with tf.name_scope('summaries'):
 
+    weights_pol_dense = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense/weights")[0]
+    weights_val_dense = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/val_dense/weights")[0]
+    biases_pol_dense = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense/biases")[0]
+    
     # Value
     val_summaries = tf.summary.merge([
         tf.summary.scalar("val_loss", val_loss),
-        tf.summary.scalar("val_mean_prediction_error", tf.reduce_mean(val_prediction_error)),
+        tf.summary.scalar("val_mean_prediction_error", tf.reduce_mean(td_error)),
         tf.summary.scalar("val_predicted_t0", val_carryover_previous_predicted[0,0]),
         tf.summary.scalar("val_reward_t0", val_actual_reward[0]),
-        tf.summary.scalar("val_predicted_t1", val_next_predicted[0,0])
+        tf.summary.scalar("val_predicted_t1", val_next_predicted[0,0]),
+        tf.summary.histogram(weights_val_dense.name, tf.reshape(weights_pol_dense.value(), [-1])),
+        tf.summary.image(weights_val_dense.name, tf.reshape(weights_val_dense.value(), [1,pv_layers[-1], 1, 1]), max_outputs=10, collections=None)
     ])
-
-    weights_pol_dense = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense/weights")[0]
-    biases_pol_dense = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense/biases")[0]
 
     # Policy
     pol_summaries =     tf.summary.merge([
@@ -274,7 +298,7 @@ with tf.name_scope('summaries'):
             tf.summary.histogram("pol_predictions_dist", pol_out_predict_dist),
             tf.summary.histogram(weights_pol_dense.name, tf.reshape(weights_pol_dense.value(), [-1])),
             tf.summary.histogram(biases_pol_dense.name, biases_pol_dense.value()),
-            tf.summary.image(weights_pol_dense.name, tf.reshape(weights_pol_dense.value(), [1,pv_layers[-1], naudio_commands, 1]), max_outputs=5, collections=None)
+            tf.summary.image(weights_pol_dense.name, tf.reshape(weights_pol_dense.value(), [1,pv_layers[-1], naudio_commands, 1]), max_outputs=10, collections=None)
             ])
     pol_rl_summaries =  tf.summary.merge([ tf.summary.scalar("polrl_step", pol_rl_step) ])
     pol_imp_summaries = tf.summary.merge([ tf.summary.scalar("polimp_loss", pol_imp_loss) ])
@@ -307,6 +331,9 @@ def one_hot(idx, total, batch_size=1):
     out[np.arange(batch_size), idx] = 1
     return out.astype(np.int32)
 
+def singlestate2batch(state, batchsize):
+    return np.repeat(state, batchsize, axis=2)
+
 def spoof_data(batch_size=1):
     return np.random.randn(batch_size,shape_eeg_feat[1],shape_eeg_feat[2])
 def spoof_act(batch_size=1):
@@ -337,9 +364,13 @@ def train(sess,writer,feed,fetch,sessrun_name=''):
         out = sess.run( fetch, feed )
     return out
 
-def val_train(sess, writer, eeg_data, sessrun_name=''):
-    feed = { in_raw_eeg_features : eeg_data}
+def val_train(sess, writer, state, eeg_data, sessrun_name=''):
+    feed = {
+            in_raw_eeg_features : eeg_data,
+            in_rnn_state : state
+            }
     fetch = {
+            'rnn_output_state': multicellFinalState,
             'train_op'  : val_train_op,
             'loss'      : val_loss,
             'summaries' : val_summaries,
@@ -349,11 +380,15 @@ def val_train(sess, writer, eeg_data, sessrun_name=''):
     return train(sess,writer,feed,fetch,sessrun_name)
 
     
-def pol_predict(sess, writer, eeg_data, sessrun_name=''):
-    feed = {in_raw_eeg_features : eeg_data}
+def choose_next_action(sess, writer, state, eeg_data, sessrun_name=''):
+    feed = {
+            in_raw_eeg_features : eeg_data,
+            in_rnn_state : state
+            }
     fetch = {
+            'rnn_output_state': multicellFinalState,
             'prediction'      : pol_out_predict_dist,
-            'prediction_old'      : pol_out_predict,
+            'prediction_old'  : pol_out_predict,
             'softmax'         : pol_out_softmax,
             'summaries'       : pol_summaries,
             'step'            : pol_step
@@ -362,11 +397,14 @@ def pol_predict(sess, writer, eeg_data, sessrun_name=''):
     return predict(sess,writer,feed,fetch,sessrun_name)
     
 
-def pol_imp_train(sess, writer, eeg_data, proctor_action, sessrun_name=''):
+def pol_imp_train(sess, writer, state, eeg_data, proctor_action, sessrun_name=''):
     feed = {
+            in_rnn_state : state,
             in_raw_eeg_features : eeg_data,
-            in_action       : proctor_action }
+            in_action       : proctor_action
+            }
     fetch = {
+            'rnn_output_state': multicellFinalState,
             'train_op'  : pol_imp_train_op,
             'loss'      : pol_imp_loss,
             'summaries' : pol_imp_summaries,
@@ -374,9 +412,13 @@ def pol_imp_train(sess, writer, eeg_data, proctor_action, sessrun_name=''):
             }
     return train(sess,writer,feed,fetch,sessrun_name)
 
-def pol_rl_train(sess, writer, eeg_data, sessrun_name=''):
-    feed = { in_raw_eeg_features : eeg_data}
+def pol_rl_train(sess, writer, state, eeg_data, sessrun_name=''):
+    feed = {
+            in_raw_eeg_features : eeg_data,
+            in_rnn_state : state
+            }
     fetch = {
+            'rnn_output_state': multicellFinalState,
             'train_op'  : pol_rl_train_op,
             'loss'      : val_loss,
             'summaries' : pol_rl_summaries,
@@ -384,8 +426,23 @@ def pol_rl_train(sess, writer, eeg_data, sessrun_name=''):
             }
     return train(sess,writer,feed,fetch,sessrun_name)
 
-def rl_train(sess, writer, eeg_data, sessrun_name=''):
-    feed = { in_raw_eeg_features : eeg_data}
+def set_rnn_state(sess, writer, state):
+    pass
+    #    init_state = np.zeros((num_layers, 2, batch_size, state_size))
+    # NOT DONE
+    # Need to initialize the first state and then update the
+    # local variable (containing the hidden state) every time we go through
+    # a training session. Also need to pass in this hidden state every time we
+    # run an op
+    
+    # Alternatively, just store a variable with the hidden state. Update this
+    # just once per "run"
+
+def rl_train(sess, writer, state, eeg_data, sessrun_name=''):
+    feed = {
+            in_raw_eeg_features : eeg_data,
+            in_rnn_state : state
+            }
     pol_fetch = {
             'pol_train_op'  : pol_rl_train_op,
             'pol_loss'      : val_loss,
@@ -428,15 +485,6 @@ sess = tf.Session()
 summary_writer = tf.summary.FileWriter(G_logdir, sess.graph)
 sess.run(tf.global_variables_initializer())
 
-#==============================================================================
-# tgt_predict(sess,summary_writer,spoof_data(1000),'TGT_PRED_TST')
-# pol_predict(sess,summary_writer,spoof_data(1000),'POL_PRED_TST')
-# tgt_train(sess,summary_writer,spoof_data(1000),spoof_rpv(1000),'TGT_TRN_TST')
-# val_train(sess,summary_writer,spoof_data(1000),'VAL_TRN_TST')
-# pol_imp_train(sess,summary_writer,spoof_data(1000),spoof_act(1000),'POL_IMP_TRN_TST')
-# pol_rl_train(sess,summary_writer,spoof_data(1000),'POL_RL_TRN_TST')
-#==============================================================================
-
 # Empty data structures
 empty_data = np.empty([0,ntimepoints,nchan,nfreqs])
 empty_rpv = np.empty([0,shape_rpv[1]])
@@ -445,19 +493,13 @@ empty_act = np.empty([0,naudio_commands])
 # Batching
 imp_training_data = empty_data
 imp_training_lbls = empty_act
-#==============================================================================
-# tgt_training_data = empty_data
-# tgt_training_lbls = empty_rpv
-#==============================================================================
 rl_training_data = empty_data
-#==============================================================================
-# tgt_minimum_batch_size = 5
-#==============================================================================
+
 imp_minimum_batch_size = 100
 rl_minimum_batch_size = 1
 
 # Intervals - all in seconds!
-interval_send_command = 0.0 # time to send all commands
+interval_send_command = 0.05 # time to send all commands
 interval_console_output = 1.0
 interval_summary_writer = 0.1
 interval_graph_saver = 60.0
@@ -516,13 +558,18 @@ def check_timekeep(timekeep, interval):
 tgt = TargetProfile()
 
 #peaks = range(16,25)
-peaks = [20]
+peaks = range(1,20)
 #amps = [1.25e0,2.5e0,5e0,10e0,20e0,10e0,5e0,2.5e0,1.25e0]
-amps = [1.0]
+amps = np.linspace(0,1,19)
 
 f,w = tgt.create_tgt_profile(peaks,amps,nchan, nfreqs, ntimepoints)
 w2 = w / np.max(w)
 set_target_profile(sess,summary_writer,w,w2,0)
+
+# The variable we use to hold the state
+import copy
+rnn_state = np.zeros(np_shape_rnn_input)
+rnn_state_tmp = copy.copy(rnn_state)
 
 try:
     while(True):
@@ -542,8 +589,9 @@ try:
         # Send output commands if they have not been sent in this interval
         if do_sendcommand:
             for i in range(1):
-                policy_predict_info = pol_predict(sess, summary_writer, raw_data[-1,None]) # select the most recent data but make sure we still have a batch size of 1 (raw_data[-1].shape = [ntimepoints,nchan,nfreq] whereas raw_data[-1,None].shape = [1,ntimepoints,nchan,nfreq]
+                policy_predict_info = pol_predict(sess, summary_writer, rnn_state, raw_data[-1,None]) # select the most recent data but make sure we still have a batch size of 1 (raw_data[-1].shape = [ntimepoints,nchan,nfreq] whereas raw_data[-1,None].shape = [1,ntimepoints,nchan,nfreq]
                 act_out = policy_predict_info['prediction'][0]
+                rnn_state_tmp = policy_predict_info['rnn_output_state']
                 OUTPUT.submit_command_relaxed(act_out)
 
                 # summaries
@@ -563,8 +611,9 @@ try:
 
         # Check to see if we have enough data to train
         if len(rl_training_data) >= rl_minimum_batch_size:
-            policy_rl_train_info = pol_rl_train(sess, summary_writer, rl_training_data)
-            value_train_info = val_train(sess, summary_writer, rl_training_data)
+            policy_rl_train_info = pol_rl_train(sess, summary_writer,singlestate2batch(rnn_state, len(rl_training_data)), rl_training_data[-1,None])
+            value_train_info = val_train(sess, summary_writer,singlestate2batch(rnn_state, len(rl_training_data)), rl_training_data[-1,None])
+            rnn_state_tmp = policy_rl_train_info['rnn_output_state']
             rl_training_data = empty_data
             timekeep_summary_writer ,   do_summaries     = check_timekeep(timekeep_summary_writer,  interval_summary_writer)
             if do_summaries:
@@ -573,7 +622,8 @@ try:
     
     
         if len(imp_training_data) >= imp_minimum_batch_size:
-            policy_imp_train_info = pol_imp_train(sess, summary_writer, imp_training_data,imp_training_lbls)
+            policy_imp_train_info = pol_imp_train(sess, summary_writer,singlestate2batch(rnn_state, len(imp_training_data)), imp_training_data,imp_training_lbls)
+            rnn_state_tmp = policy_imp_train_info['rnn_output_state'][-1]
             imp_training_data = empty_data
             imp_training_lbls = empty_act
             timekeep_summary_writer1 ,   do_summaries1     = check_timekeep(timekeep_summary_writer1,  interval_summary_writer)
@@ -595,6 +645,8 @@ try:
         timekeep_send_command   ,   do_sendcommand   = check_timekeep(timekeep_send_command,    interval_send_command)
         timekeep_console_output ,   do_console       = check_timekeep(timekeep_console_output,  interval_console_output)
 
+        if (rnn_state != rnn_state_tmp).all():
+            rnn_state = np.asarray(rnn_state_tmp)[:,:,-1,None,:]
 
 except KeyboardInterrupt:
     print("Receieved interrupt")

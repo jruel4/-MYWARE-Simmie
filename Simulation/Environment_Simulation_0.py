@@ -115,6 +115,8 @@ class EnvironmentSimulator:
         if command in EnvironmentSimulator.DynamicsCommands:
             vol = self.DynamicsVals[command - self.DynamicsOffset]
             #TODO use the vol to influence output power...
+            
+            self.output_data_simulator.set_peaks_amps([], [])
  
         elif command in EnvironmentSimulator.AMCommands:
             bleat = self.AMVals[command - self.AMOffset]
@@ -125,12 +127,15 @@ class EnvironmentSimulator:
         elif command in EnvironmentSimulator.FMCommands:
             base = self.FMVals[command- self.FMOffset]
             #TODO construct hypothesis regarding effect of base frequency on entrainment.
+            
+            self.output_data_simulator.set_peaks_amps([], [])
 
         elif command in EnvironmentSimulator.OscillatorCoupledCommands:
-            pass
+            self.output_data_simulator.set_peaks_amps([], [])
             
         elif command in EnvironmentSimulator.OscillatorUncoupledCommands:
             self.osc_id = self.OscVals[command - self.OscOffset]
+            self.output_data_simulator.set_peaks_amps([], [])
             
     def simulation_thread(self):
         '''
@@ -182,7 +187,7 @@ class EnvironmentSimulator:
         # Launch the fake data simulator to send outputs to
         #TODO use LSL Utils
         self.output_data_simulator = Fake_Periodogram()
-        self.output_data_simulator.create_fake_periodo(name="SIM1", sps=250.0, nchan=1, nfreqs=250,noise_max_amp = 0.0)
+        self.output_data_simulator.create_fake_periodo(name="SIM1", sps=250.0, nchan=1, nfreqs=250,noise_max_amp = 0.25)
         self.output_data_simulator.set_peaks_amps([1.0], [1.0])
         
     def set_fake_eeg_properties(self, freq):
@@ -191,7 +196,7 @@ class EnvironmentSimulator:
         '''
         #TODO set fake freqs
         self.output_data_simulator.set_peaks_amps([freq], [1.0])
-        if self.rx_count % 50 == 0:
+        if self.rx_count % 5 == 0:
             print("Setting peak frequency to: ", freq)
         
         
