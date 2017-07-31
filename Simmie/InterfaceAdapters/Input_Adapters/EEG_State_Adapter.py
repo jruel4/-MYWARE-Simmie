@@ -32,6 +32,11 @@ class EEGStateAdapter:
         self.num_freqs = n_freq
         self.n_spectrogram_timepoints = n_spectrogram_timepoints
         self.eeg_fifo_len = spectrogram_timespan * eeg_feed_rate #assuming spectrogram_timespan is in seconds
+        
+        # Verify this is an int, then cast to int
+        assert self.eeg_fifo_len.is_integer(), "Spectrogram timespan (" + str(spectrogram_timespan) +") * SPS (" + str(eeg_feed_rate) + ") must be an integer, is: " + str(self.eeg_fifo_len)
+        self.eeg_fifo_len = int(self.eeg_fifo_len)
+
         self.cache_interval = int(samples_per_output)
         self.eeg_thread_event = Event()
         self.eeg_data_cache = list()

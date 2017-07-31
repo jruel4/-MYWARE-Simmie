@@ -14,12 +14,10 @@ from Simmie.InterfaceAdapters.Input_Adapters.EEG_State_Adapter import EEGStateAd
 
 from LSLUtils.TargetProfile import TargetProfile
 
-
 nchan = 1
 nfreqs = 250
 ntimepoints = 1
 sps=125
-
 
 OUTPUT = AudioCommandAdapter(
         name="Simmie",
@@ -142,7 +140,9 @@ for val_lr in hp_search_val_lr:
         
         with tf.name_scope("optimizers"):
         #    val_optimizer = tf.train.GradientDescentOptimizer(learning_rate=val_lr)
-            val_optimizer = tf.train.AdamOptimizer(learning_rate=val_lr)
+#==============================================================================
+#             val_optimizer = tf.train.AdamOptimizer(learning_rate=val_lr)
+#==============================================================================
         #    pol_imp_optimizer = tf.train.RMSPropOptimizer(learning_rate=pol_imp_lr, centered=False, decay=0.8)
         #    pol_rl_optimizer = tf.train.RMSPropOptimizer(learning_rate=pol_rl_lr, centered=False, decay=0.8)
         
@@ -156,63 +156,67 @@ for val_lr in hp_search_val_lr:
             reward - the reward (supports batching)
                 1D tensor of length "batch_size"
         '''
-        with tf.variable_scope("rwrd"):
-            tgt = tf.get_variable("TargetProfile", shape = shape_tgt_profile, initializer=tf.constant_initializer(value=1.0), trainable=False)
-            tgt_weighting = tf.get_variable("TargetProfileWeighting", shape = shape_tgt_profile, initializer=tf.constant_initializer(value=1.0), trainable=False)
-            
-            reward_ringbuf = tf.get_variable("RewardMA", shape=[100], initializer=tf.constant_initializer(0.0), trainable=False)
-            
-            # Assign op is used when changing the target profile
-            tgt_assgn = tf.assign(tgt, in_tgt_profile)
-            tgt_weighting_assgn = tf.assign(tgt_weighting, in_tgt_weighting)
+#==============================================================================
+#         with tf.variable_scope("rwrd"):
+#             tgt = tf.get_variable("TargetProfile", shape = shape_tgt_profile, initializer=tf.constant_initializer(value=1.0), trainable=False)
+#             tgt_weighting = tf.get_variable("TargetProfileWeighting", shape = shape_tgt_profile, initializer=tf.constant_initializer(value=1.0), trainable=False)
+#             
+#             reward_ringbuf = tf.get_variable("RewardMA", shape=[100], initializer=tf.constant_initializer(0.0), trainable=False)
+#             
+#             # Assign op is used when changing the target profile
+#             tgt_assgn = tf.assign(tgt, in_tgt_profile)
+#             tgt_weighting_assgn = tf.assign(tgt_weighting, in_tgt_weighting)
+#         
+#             # Take the euclidean distance between the two tensors
+#             diff = in_eeg_features - tgt
+#             sq = tf.square(diff)
+#             sq_weighted = sq * tgt_weighting
+#             summed = tf.reduce_sum(sq_weighted,axis=(1,2))
+#             sqrt = tf.sqrt(summed)
+#             distance = sqrt
+#             
+#             reward_ma = tf.reduce_mean(reward_ringbuf)
+#             
+#             reward = distance - reward_ma
+#             
+#             # Rotate the buffer
+#             with tf.control_dependencies([reward]):
+#                 rb_rot = tf.concat([reward_ringbuf[1:], tf.reduce_sum(distance,keep_dims=True)], axis=0)
+#                 reward_ringbuf_assgn = tf.assign(reward_ringbuf,rb_rot)
+#         
+#==============================================================================
         
-            # Take the euclidean distance between the two tensors
-            diff = in_eeg_features - tgt
-            sq = tf.square(diff)
-            sq_weighted = sq * tgt_weighting
-            summed = tf.reduce_sum(sq_weighted,axis=(1,2))
-            sqrt = tf.sqrt(summed)
-            distance = sqrt
-            
-            reward_ma = tf.reduce_mean(reward_ringbuf)
-            
-            reward = distance - reward_ma
-            
-            # Rotate the buffer
-            with tf.control_dependencies([reward]):
-                rb_rot = tf.concat([reward_ringbuf[1:], tf.reduce_sum(distance,keep_dims=True)], axis=0)
-                reward_ringbuf_assgn = tf.assign(reward_ringbuf,rb_rot)
-        
-        
-        # SHARED NET
-        with tf.variable_scope("pv"):
-            
-            # For each "layer" create an LSTM cell
-            LSTMCellOps = list()
-            for pv_units in pv_layers:
-                LSTMCellOps.append(tf.contrib.rnn.BasicLSTMCell(pv_units, state_is_tuple=True,forget_bias=2.0))
-        
-            # Connect all of the LSTM cells together
-            stackedLSTM = tf.contrib.rnn.MultiRNNCell(LSTMCellOps, state_is_tuple=True)
-        
-            # Unroll the input (assuming we're getting a static sequence length in, TODO make dynamic...)
-            unstackedInput = tf.unstack(in_eeg_features, axis=1, num=pv_unroll_len, name="PV_UnrolledInput")
-        
-            #JCR0
-            # Load in the LSTM state
-            l = tf.unstack(in_rnn_state, axis=0)
-            rnn_tuple_state = tuple(
-                [tf.nn.rnn_cell.LSTMStateTuple(l[idx][0], l[idx][1])
-                 for idx in range(len(pv_layers))]
-            )
-            
-        #    batch_size = tf.concat((tf.shape(in_eeg_features)[0,None], np.ones([3])), 0)
-        #    rnn_states_batch = tf.tile(rnn_tuple_state, batch_size)
-        
-            # Generate RNN, multicellFinalState is the final state
-            cellOutputs, multicellFinalState = tf.contrib.rnn.static_rnn(stackedLSTM, unstackedInput, dtype=tf.float32, initial_state=rnn_tuple_state,scope='pv_rnn')
-        
-            pv_lstm_out = cellOutputs[-1]
+#==============================================================================
+#         # SHARED NET
+#         with tf.variable_scope("pv"):
+#             
+#             # For each "layer" create an LSTM cell
+#             LSTMCellOps = list()
+#             for pv_units in pv_layers:
+#                 LSTMCellOps.append(tf.contrib.rnn.BasicLSTMCell(pv_units, state_is_tuple=True,forget_bias=2.0))
+#         
+#             # Connect all of the LSTM cells together
+#             stackedLSTM = tf.contrib.rnn.MultiRNNCell(LSTMCellOps, state_is_tuple=True)
+#         
+#             # Unroll the input (assuming we're getting a static sequence length in, TODO make dynamic...)
+#             unstackedInput = tf.unstack(in_eeg_features, axis=1, num=pv_unroll_len, name="PV_UnrolledInput")
+#         
+#             #JCR0
+#             # Load in the LSTM state
+#             l = tf.unstack(in_rnn_state, axis=0)
+#             rnn_tuple_state = tuple(
+#                 [tf.nn.rnn_cell.LSTMStateTuple(l[idx][0], l[idx][1])
+#                  for idx in range(len(pv_layers))]
+#             )
+#             
+#         #    batch_size = tf.concat((tf.shape(in_eeg_features)[0,None], np.ones([3])), 0)
+#         #    rnn_states_batch = tf.tile(rnn_tuple_state, batch_size)
+#         
+#             # Generate RNN, multicellFinalState is the final state
+#             cellOutputs, multicellFinalState = tf.contrib.rnn.static_rnn(stackedLSTM, unstackedInput, dtype=tf.float32, initial_state=rnn_tuple_state,scope='pv_rnn')
+#         
+#             pv_lstm_out = cellOutputs[-1]
+#==============================================================================
             
             '''
             VALUE NET
@@ -224,84 +228,88 @@ for val_lr in hp_search_val_lr:
                 val_output_units - number of output units (usually just 1)
                 val_tgt_weights - 
             '''
-            with tf.name_scope("val"):
-                # Carryover is the predicted value for state t0 using data from t-1
-                val_carryover_previous_predicted = tf.get_variable("VAL_PreviousPredicted", shape=(1,1), dtype=tf.float32, initializer=tf.constant_initializer(0.0), trainable=False)
+#==============================================================================
+#             with tf.name_scope("val"):
+#                 # Carryover is the predicted value for state t0 using data from t-1
+#                 val_carryover_previous_predicted = tf.get_variable("VAL_PreviousPredicted", shape=(1,1), dtype=tf.float32, initializer=tf.constant_initializer(0.0), trainable=False)
+#             
+#                 # Next predicted is v(t0) -> v(tN)
+#                 val_next_predicted = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=val_output_units, activation_fn=None,scope='val_dense')
+#                 val_previous_predicted = tf.concat([val_carryover_previous_predicted, val_next_predicted[:-1]],axis=0)
+#                 val_actual_reward = reward
+#         #        val_actual_reward = tf.constant([-2.0])
+#         
+#                 # Value prediction error is (R(T) + future_discount*V(T+1)) - V(T)
+#                 #   V(T) represents the expected value of this state
+#                 #   (R(T) + future_discount*V(T+1)) represents a more accurate value (since we know R(T))
+#                 td_error = (val_actual_reward + val_discount_rate * val_next_predicted) - val_carryover_previous_predicted
+#         
+#                 with tf.name_scope('loss'):
+#                     val_loss = tf.abs(tf.reduce_mean(td_error)) # need to manage execution order here, this won't work...
+#                 val_step = tf.Variable(0, name='VAL_Step', trainable=False)
+#                 
+#                 val_trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pv_rnn") + tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/val_dense")
+#                 val_train_op = val_optimizer.minimize(val_loss, var_list=val_trainable_variables, global_step=val_step)
+#                 
+#                 with tf.control_dependencies([val_loss]):
+#                     val_assgn_op0 = val_carryover_previous_predicted.assign([val_next_predicted[0]])
+#                 
+#==============================================================================
             
-                # Next predicted is v(t0) -> v(tN)
-                val_next_predicted = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=val_output_units, activation_fn=None,scope='val_dense')
-                val_previous_predicted = tf.concat([val_carryover_previous_predicted, val_next_predicted[:-1]],axis=0)
-                val_actual_reward = reward
-        #        val_actual_reward = tf.constant([-2.0])
-        
-                # Value prediction error is (R(T) + future_discount*V(T+1)) - V(T)
-                #   V(T) represents the expected value of this state
-                #   (R(T) + future_discount*V(T+1)) represents a more accurate value (since we know R(T))
-                td_error = (val_actual_reward + val_discount_rate * val_next_predicted) - val_carryover_previous_predicted
-        
-                with tf.name_scope('loss'):
-                    val_loss = tf.abs(tf.reduce_mean(td_error)) # need to manage execution order here, this won't work...
-                val_step = tf.Variable(0, name='VAL_Step', trainable=False)
-                
-                val_trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pv_rnn") + tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/val_dense")
-                val_train_op = val_optimizer.minimize(val_loss, var_list=val_trainable_variables, global_step=val_step)
-                
-                with tf.control_dependencies([val_loss]):
-                    val_assgn_op0 = val_carryover_previous_predicted.assign([val_next_predicted[0]])
-                
-            
-            # POLICY
-            with tf.name_scope("policy_choose_action"):
-                pol_dense0 = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=pol_output_units, activation_fn=None,scope='pol_dense')
-                pol_out_softmax = tf.nn.softmax(pol_dense0, name="POL_Softmax")
-                pol_out_predict = tf.arg_max(pol_out_softmax, 1, "POL_Prediction")
-        
-                # Choose our output action based on the softmax probabilities
-                dist = tf.contrib.distributions.Multinomial(total_count=1., probs=pol_out_softmax)
-                dist_sample = dist.sample()
-                pol_out_predict_dist = tf.arg_max(dist_sample, 1, "POL_PredictionDist")
-        #        pol_out_predict_dist = tf.constant([36])
-                
-                # Used for summaries
-                pol_step_var = tf.Variable(0, name='POL_Step', trainable=False)
-                pol_step = tf.assign(pol_step_var, pol_step_var + 1)
-        
-            with tf.name_scope("calc_pol_grads"):
-                # Get the variables which we can train on
-                pol_trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pv_rnn") + tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense")
-        
-                # Reduce softmax output to only actions we have chosen
-                # NOTE: dist_sample is basically a mask, 0 if action was not chosen and 1 if action was chosen
-                pol_chosen_act = tf.cast(tf.reduce_max(pol_out_softmax * dist_sample, axis=1), tf.float32)
-                pol_gradients_tmp = [ grad / pol_chosen_act for grad in tf.gradients(pol_chosen_act, pol_trainable_variables) ]
-                # CAUTION: The above statement will break if the batch size is not 1!
-                
-                # Create gradient variables
-                pol_gradients = list()
-                for v in pol_trainable_variables:
-                    pol_gradients.append( tf.get_variable("policy_gradient/" + v.name.split(':')[0], shape=v.shape, dtype=v.dtype, trainable=False, initializer=tf.constant_initializer(0.0)) )
-                
-                # Create gradient save op
-                pol_gradient_saveop = list()
-                for idx in range(len(pol_gradients)):
-                    pol_gradient_saveop.append( tf.assign( pol_gradients[idx], pol_gradients_tmp[idx]))
-                    
-                '''
-                YOU MUST INCLUDE pol_gradient_saveop IN FETCH DICT WHEN RUNNING A PREDICTION
-                '''
-                
-            with tf.name_scope("policy_backprop"):        
-                pol_rl_step = tf.Variable(0, name='POLRL_Step', trainable=False)
-                
-                # Generate the training op
-                pol_rl_train_op = list()
-                for idx in range(len(pol_trainable_variables)):
-                    delta = pol_gradients[idx] * pol_rl_lr * tf.reduce_sum(td_error,axis=0)
-                    pol_rl_train_op.append(tf.assign(pol_trainable_variables[idx], pol_trainable_variables[idx] + delta))
-        
-                # Is this how we're supposed to update the step??
-                pol_rl_train_op.append(tf.assign(pol_rl_step, pol_rl_step+1))
-        
+#==============================================================================
+#             # POLICY
+#             with tf.name_scope("policy_choose_action"):
+#                 pol_dense0 = tf.contrib.layers.fully_connected(inputs=pv_lstm_out, num_outputs=pol_output_units, activation_fn=None,scope='pol_dense')
+#                 pol_out_softmax = tf.nn.softmax(pol_dense0, name="POL_Softmax")
+#                 pol_out_predict = tf.arg_max(pol_out_softmax, 1, "POL_Prediction")
+#         
+#                 # Choose our output action based on the softmax probabilities
+#                 dist = tf.contrib.distributions.Multinomial(total_count=1., probs=pol_out_softmax)
+#                 dist_sample = dist.sample()
+#                 pol_out_predict_dist = tf.arg_max(dist_sample, 1, "POL_PredictionDist")
+#         #        pol_out_predict_dist = tf.constant([36])
+#                 
+#                 # Used for summaries
+#                 pol_step_var = tf.Variable(0, name='POL_Step', trainable=False)
+#                 pol_step = tf.assign(pol_step_var, pol_step_var + 1)
+#         
+#             with tf.name_scope("calc_pol_grads"):
+#                 # Get the variables which we can train on
+#                 pol_trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pv_rnn") + tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "pv/pol_dense")
+#         
+#                 # Reduce softmax output to only actions we have chosen
+#                 # NOTE: dist_sample is basically a mask, 0 if action was not chosen and 1 if action was chosen
+#                 pol_chosen_act = tf.cast(tf.reduce_max(pol_out_softmax * dist_sample, axis=1), tf.float32)
+#                 pol_gradients_tmp = [ grad / pol_chosen_act for grad in tf.gradients(pol_chosen_act, pol_trainable_variables) ]
+#                 # CAUTION: The above statement will break if the batch size is not 1!
+#                 
+#                 # Create gradient variables
+#                 pol_gradients = list()
+#                 for v in pol_trainable_variables:
+#                     pol_gradients.append( tf.get_variable("policy_gradient/" + v.name.split(':')[0], shape=v.shape, dtype=v.dtype, trainable=False, initializer=tf.constant_initializer(0.0)) )
+#                 
+#                 # Create gradient save op
+#                 pol_gradient_saveop = list()
+#                 for idx in range(len(pol_gradients)):
+#                     pol_gradient_saveop.append( tf.assign( pol_gradients[idx], pol_gradients_tmp[idx]))
+#                     
+#                 '''
+#                 YOU MUST INCLUDE pol_gradient_saveop IN FETCH DICT WHEN RUNNING A PREDICTION
+#                 '''
+#                 
+#             with tf.name_scope("policy_backprop"):        
+#                 pol_rl_step = tf.Variable(0, name='POLRL_Step', trainable=False)
+#                 
+#                 # Generate the training op
+#                 pol_rl_train_op = list()
+#                 for idx in range(len(pol_trainable_variables)):
+#                     delta = pol_gradients[idx] * pol_rl_lr * tf.reduce_sum(td_error,axis=0)
+#                     pol_rl_train_op.append(tf.assign(pol_trainable_variables[idx], pol_trainable_variables[idx] + delta))
+#         
+#                 # Is this how we're supposed to update the step??
+#                 pol_rl_train_op.append(tf.assign(pol_rl_step, pol_rl_step+1))
+#         
+#==============================================================================
         #==============================================================================
         #     with tf.name_scope("pol_imp"):
         #         pol_imp_step = tf.Variable(0, name='POLIMP_Step', trainable=False)

@@ -16,7 +16,7 @@ and output a fake eeg signal at that same frequency.
 # Imports
 from pylsl import StreamInfo, StreamOutlet, StreamInlet, resolve_stream
 from threading import Thread, Event
-from LSLUtils import Periodogram as Fake_Periodogram
+from LSLUtils.Periodogram import Periodogram as Fake_Periodogram
 
 # Utility functions
 def get_n_key_freq(n):
@@ -114,7 +114,8 @@ class EnvironmentSimulator:
         # Map single command index to type
         if command in EnvironmentSimulator.DynamicsCommands:
             vol = self.DynamicsVals[command - self.DynamicsOffset]
-            #TODO use the vol to influence output power...
+            #TODO use the vol to influence output power...            
+            self.output_data_simulator.set_peaks_amps([], [])
  
         elif command in EnvironmentSimulator.AMCommands:
             bleat = self.AMVals[command - self.AMOffset]
@@ -124,13 +125,15 @@ class EnvironmentSimulator:
 
         elif command in EnvironmentSimulator.FMCommands:
             base = self.FMVals[command- self.FMOffset]
-            #TODO construct hypothesis regarding effect of base frequency on entrainment.
+            #TODO construct hypothesis regarding effect of base frequency on entrainment.            
+            self.output_data_simulator.set_peaks_amps([], [])
 
         elif command in EnvironmentSimulator.OscillatorCoupledCommands:
-            pass
+            self.output_data_simulator.set_peaks_amps([], [])
             
         elif command in EnvironmentSimulator.OscillatorUncoupledCommands:
             self.osc_id = self.OscVals[command - self.OscOffset]
+            self.output_data_simulator.set_peaks_amps([], [])
             
     def simulation_thread(self):
         '''
@@ -142,9 +145,14 @@ class EnvironmentSimulator:
         while self.command_thread_event.isSet():
     
             # get command
-            command_set, timestamps = self.inlet.pull_sample()
+            command_set, timestamps = self.inlet.pull_sample(timeout=12.5)
+            if command_set == None and timestamps == None:
+                if self.rx_count > 0:
+                    print("Timed out pulling sample.")
+                    self.command_thread_event.clear()
+                continue
             
-            if self.rx_count % 5 == 0:
+            if self.rx_count % 50 == 0:
                 print("rx cmd: ",command_set)
             self.rx_count += 1
             
@@ -156,10 +164,12 @@ class EnvironmentSimulator:
             else:
                 print("Invalid command set size: ",command_set)
                 
-        print("Ending command rx loop")
+        self.output_data_simulator.kill()
+        print("Ending command rx loop.")
 
     def launch_simulator(self, manual_stream_select=True):
-        
+        print("Launching environment simulator, looking for \"AudioCommands\" stream...")
+
         # Select the command thread to receive inputs from
         streams = resolve_stream('type', 'AudioCommands')
         snum = 0
@@ -167,6 +177,7 @@ class EnvironmentSimulator:
             for i,s in enumerate(streams):
                 print(i,s.name())
             snum = input("Select desired stream: ")
+        self.inlet = StreamInlet(streams[int(snum)])
         self.inlet = StreamInlet(streams[snum])
         self.command_thread_event.set()
         thread = Thread(target=self.simulation_thread)
@@ -175,30 +186,30 @@ class EnvironmentSimulator:
         # Launch the fake data simulator to send outputs to
         #TODO use LSL Utils
         self.output_data_simulator = Fake_Periodogram()
-        self.output_data_simulator._launch_thread()
-        self.output_data_simulator.set_peaks_amps([1.0], [.2])
-        
+        self.output_data_simulator.create_fake_periodo(name="SIM1", sps=125.0, nchan=1, nfreqs=250,noise_max_amp = 0.0)
+        self.output_data_simulator.set_peaks_amps([1.0], [1.0])
+    
+    def kill(self):
+        self.command_thread_event.clear()
+        self.output_data_simulator.kill()
+
     def set_fake_eeg_properties(self, freq):
         '''
         Set dominant eeg frequency to use in eeg data synthesis
         '''
         #TODO set fake freqs
-        self.output_data_simulator.set_peaks_amps([freq], [0.2])
+        self.output_data_simulator.set_peaks_amps([freq], [1.0])
+        if self.rx_count % 5 == 0:
+            print("Setting peak frequency to: ", freq)
+        
+        
         
 if __name__ == "__main__":
-    #TODO write test 
-    pass        
-        
-      
-        
-        
-        
-        
-        
-        
-        
-        
-        
+    simu = EnvironmentSimulator()
+    simu.launch_simulator()
+    
+    def nix():
+        simu.kill()
         
         
         

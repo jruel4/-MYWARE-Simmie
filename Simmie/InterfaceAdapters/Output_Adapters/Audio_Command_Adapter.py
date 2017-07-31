@@ -60,6 +60,7 @@ class AudioCommandAdapter:
 #==============================================================================
     def close(self):
         del self.outlet
+        del self.outlet_relax
 
     def submit_command_relaxed(self, command_idx):
         '''
