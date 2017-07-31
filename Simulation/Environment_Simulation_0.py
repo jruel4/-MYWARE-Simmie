@@ -114,8 +114,7 @@ class EnvironmentSimulator:
         # Map single command index to type
         if command in EnvironmentSimulator.DynamicsCommands:
             vol = self.DynamicsVals[command - self.DynamicsOffset]
-            #TODO use the vol to influence output power...
-            
+            #TODO use the vol to influence output power...            
             self.output_data_simulator.set_peaks_amps([], [])
  
         elif command in EnvironmentSimulator.AMCommands:
@@ -126,8 +125,7 @@ class EnvironmentSimulator:
 
         elif command in EnvironmentSimulator.FMCommands:
             base = self.FMVals[command- self.FMOffset]
-            #TODO construct hypothesis regarding effect of base frequency on entrainment.
-            
+            #TODO construct hypothesis regarding effect of base frequency on entrainment.            
             self.output_data_simulator.set_peaks_amps([], [])
 
         elif command in EnvironmentSimulator.OscillatorCoupledCommands:
@@ -180,6 +178,7 @@ class EnvironmentSimulator:
                 print(i,s.name())
             snum = input("Select desired stream: ")
         self.inlet = StreamInlet(streams[int(snum)])
+        self.inlet = StreamInlet(streams[snum])
         self.command_thread_event.set()
         thread = Thread(target=self.simulation_thread)
         thread.start()
@@ -211,14 +210,6 @@ if __name__ == "__main__":
     
     def nix():
         simu.kill()
-        
-        
-        
-        
-        
-        
-        
-        
         
         
         

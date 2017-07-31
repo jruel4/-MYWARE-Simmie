@@ -14,10 +14,12 @@ from Simmie.InterfaceAdapters.Input_Adapters.EEG_State_Adapter import EEGStateAd
 
 from LSLUtils.TargetProfile import TargetProfile
 
+
 nchan = 1
 nfreqs = 250
 ntimepoints = 1
 sps=125
+
 
 OUTPUT = AudioCommandAdapter(
         name="Simmie",
